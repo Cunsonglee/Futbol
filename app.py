@@ -296,7 +296,6 @@ elif menu == "👥 Gestionar Miembros":
     st.divider()
     
     conn = sqlite3.connect(DB_NAME)
-    # 🔥 修改点：按字母 A-Z 升序读取成员名单用于显示和删除
     current_members = pd.read_sql_query("SELECT name FROM members ORDER BY name ASC", conn)
     
     if not current_members.empty:
@@ -312,7 +311,8 @@ elif menu == "👥 Gestionar Miembros":
             else:
                 st.warning("Por favor, selecciona un miembro primero")
                 
-        st.subheader("🏃 Lista actual")
+        # 🔥 修改点：在这里动态计算并显示总人数
+        st.subheader(f"🏃 Lista actual (Total: {len(current_members)})")
         for name in current_members['name']:
             st.write(f"- {name}")
     else:
