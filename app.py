@@ -44,12 +44,11 @@ def formatear_precio(is_free, price, num, unit):
         return f"{price:.2f} € / {num} {unit_str}"
 
 # ================= Configuración de la Base de Datos (数据库设置 V4) =================
-DB_NAME = 'football_v4.db' # 升级数据库版本，为成员表添加手机号字段
+DB_NAME = 'football_v4.db' 
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # 🔥 成员表新增了 phone (电话) 字段
     c.execute('''CREATE TABLE IF NOT EXISTS members (name TEXT UNIQUE, phone TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS venues 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -280,14 +279,13 @@ elif menu == "👥 Gestionar Miembros":
     
     with st.form("add_member_form"):
         new_member = st.text_input("Introduce el nombre del compañero")
-        # 🔥 新增：手机号码输入框
-        phone_number = st.text_input("Número de teléfono (Ej: 612345678)")
+        # 🔥 明确标示为选填 (Opcional)
+        phone_number = st.text_input("Número de teléfono (Opcional, Ej: 612345678)")
         
         if st.form_submit_button("Añadir miembro"):
             if new_member:
                 conn = sqlite3.connect(DB_NAME)
                 try:
-                    # 🔥 更新：将姓名和电话一起存入数据库
                     conn.execute("INSERT INTO members (name, phone) VALUES (?, ?)", (new_member, phone_number))
                     conn.commit()
                     st.success(f"✅ Miembro añadido con éxito: {new_member}")
@@ -300,7 +298,6 @@ elif menu == "👥 Gestionar Miembros":
     st.divider()
     
     conn = sqlite3.connect(DB_NAME)
-    # 🔥 更新：查询时同时读取电话号码
     current_members = pd.read_sql_query("SELECT name, phone FROM members ORDER BY name ASC", conn)
     
     if not current_members.empty:
@@ -317,9 +314,14 @@ elif menu == "👥 Gestionar Miembros":
                 st.warning("Por favor, selecciona un miembro primero")
                 
         st.subheader(f"🏃 Lista actual (Total: {len(current_members)})")
-        # 🔥 更新：在列表中展示姓名和电话
+        
+        # 🔥 更加智能的判空显示逻辑
         for index, row in current_members.iterrows():
-            telefono_str = row['phone'] if row['phone'] else "No especificado"
+            if pd.notna(row['phone']) and str(row['phone']).strip() != "":
+                telefono_str = str(row['phone']).strip()
+            else:
+                telefono_str = "No especificado"
+                
             st.write(f"- **{row['name']}** | 📱 Tel: {telefono_str}")
     else:
         st.info("No hay miembros actualmente.")
