@@ -9,7 +9,7 @@ import urllib.parse
 # Configuración de la página (设置网页标题和图标)
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
 
-# ================= Funciones Auxiliares (辅助函数：获取 Google 地图名称) =================
+# ================= Funciones Auxiliares (辅助函数) =================
 def fetch_venue_name(url):
     """Extraer nombre de la URL o intentar obtener el título de la página"""
     try:
@@ -33,15 +33,32 @@ def fetch_venue_name(url):
     except Exception as e:
         return None
 
-# ================= Configuración de la Base de Datos (数据库设置) =================
-DB_NAME = 'football_v2.db'
+def formatear_precio(is_free, price, num, unit):
+    """Formatear el texto del precio (处理免费和价格单位的复数显示)"""
+    if is_free:
+        return "Gratis"
+    else:
+        unit_str = unit
+        if num > 1:
+            unit_str = "días" if unit == "día" else unit + "s"
+        return f"{price:.2f} € / {num} {unit_str}"
+
+# ================= Configuración de la Base de Datos (数据库设置 V3) =================
+DB_NAME = 'football_v3.db' # 升级数据库版本，添加价格字段
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS members (name TEXT UNIQUE)''')
+    # 新增了 is_free, price, duration_num, duration_unit 字段
     c.execute('''CREATE TABLE IF NOT EXISTS venues 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, map_url TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                  name TEXT UNIQUE, 
+                  map_url TEXT,
+                  is_free INTEGER,
+                  price REAL,
+                  duration_num INTEGER,
+                  duration_unit TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS events 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, event_datetime TEXT, venue_name TEXT, map_url TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS registrations 
@@ -67,7 +84,6 @@ if menu == "🏠 Inicio":
     conn = sqlite3.connect(DB_NAME)
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     
-    # Buscar el próximo partido (时间大于等于现在的比赛)
     query = "SELECT * FROM events WHERE event_datetime >= ? ORDER BY event_datetime ASC LIMIT 1"
     event_df = pd.read_sql_query(query, conn, params=(current_time,))
     
@@ -77,8 +93,20 @@ if menu == "🏠 Inicio":
         venue_name = event_df['venue_name'][0]
         map_url = event_df['map_url'][0]
         
+        # 获取场地的价格信息
+        venue_info = pd.read_sql_query("SELECT is_free, price, duration_num, duration_unit FROM venues WHERE name=?", conn, params=(venue_name,))
+        texto_precio = "No especificado"
+        if not venue_info.empty:
+            v_free = bool(venue_info['is_free'][0])
+            v_price = venue_info['price'][0]
+            v_num = venue_info['duration_num'][0]
+            v_unit = venue_info['duration_unit'][0]
+            texto_precio = formatear_precio(v_free, v_price, v_num, v_unit)
+        
         st.subheader("📅 Información del Próximo Partido")
-        st.info(f"**⏰ Fecha y Hora:** {event_datetime}\n\n**🏟️ Campo:** {venue_name}")
+        # 显示时间、场地和价格
+        st.info(f"**⏰ Fecha y Hora:** {event_datetime}\n\n**🏟️ Campo:** {venue_name}\n\n**💰 Precio:** {texto_precio}")
+        
         if map_url:
             st.markdown(f"📍 **[Haz clic aquí para abrir en Google Maps]({map_url})**")
             
@@ -161,6 +189,19 @@ elif menu == "🏟️ Gestionar Campos":
     
     st.subheader("✨ Añadir nuevo campo")
     auto_url = st.text_input("Introduce el enlace de Google Maps", placeholder="https://www.google.com/maps/place/...")
+    
+    # 价格设置区域
+    st.markdown("💰 **Configuración de Precio**")
+    auto_is_free = st.checkbox("Gratis (Gratuito)", key="auto_free")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        auto_price = st.number_input("Precio (€)", min_value=0.0, step=1.0, format="%.2f", disabled=auto_is_free, key="auto_price")
+    with col2:
+        auto_num = st.selectbox("Cantidad", list(range(1, 13)), disabled=auto_is_free, key="auto_num")
+    with col3:
+        auto_unit = st.selectbox("Unidad", ["minuto", "hora", "día"], disabled=auto_is_free, key="auto_unit")
+
     if st.button("Extraer y guardar automáticamente", type="primary"):
         if auto_url:
             with st.spinner("Obteniendo información del campo..."):
@@ -169,7 +210,8 @@ elif menu == "🏟️ Gestionar Campos":
                     conn = sqlite3.connect(DB_NAME)
                     c = conn.cursor()
                     try:
-                        c.execute("INSERT INTO venues (name, map_url) VALUES (?, ?)", (venue_name, auto_url))
+                        c.execute("INSERT INTO venues (name, map_url, is_free, price, duration_num, duration_unit) VALUES (?, ?, ?, ?, ?, ?)", 
+                                  (venue_name, auto_url, int(auto_is_free), auto_price, auto_num, auto_unit))
                         conn.commit()
                         st.success(f"✅ Campo añadido con éxito: **{venue_name}**")
                     except sqlite3.IntegrityError:
@@ -182,24 +224,39 @@ elif menu == "🏟️ Gestionar Campos":
             st.warning("¡Por favor, introduce el enlace primero!")
 
     with st.expander("🛠️ Añadir campo manualmente"):
-        with st.form("manual_venue_form"):
-            manual_name = st.text_input("Nombre del campo (Manual)")
-            manual_url = st.text_input("Enlace del mapa (Manual)")
-            if st.form_submit_button("Guardar"):
-                if manual_name and manual_url:
-                    conn = sqlite3.connect(DB_NAME)
-                    try:
-                        conn.execute("INSERT INTO venues (name, map_url) VALUES (?, ?)", (manual_name, manual_url))
-                        conn.commit()
-                        st.success("¡Añadido con éxito!")
-                    except sqlite3.IntegrityError:
-                        st.error("El nombre ya existe")
-                    conn.close()
+        # 注意：这里去掉了 st.form，因为 form 内部不支持 disabled 实时更新
+        manual_name = st.text_input("Nombre del campo (Manual)")
+        manual_url = st.text_input("Enlace del mapa (Manual)")
+        
+        st.markdown("💰 **Configuración de Precio**")
+        man_is_free = st.checkbox("Gratis (Gratuito)", key="man_free")
+        
+        col4, col5, col6 = st.columns(3)
+        with col4:
+            man_price = st.number_input("Precio (€)", min_value=0.0, step=1.0, format="%.2f", disabled=man_is_free, key="man_price")
+        with col5:
+            man_num = st.selectbox("Cantidad", list(range(1, 13)), disabled=man_is_free, key="man_num")
+        with col6:
+            man_unit = st.selectbox("Unidad", ["minuto", "hora", "día"], disabled=man_is_free, key="man_unit")
+            
+        if st.button("Guardar campo manualmente"):
+            if manual_name and manual_url:
+                conn = sqlite3.connect(DB_NAME)
+                try:
+                    conn.execute("INSERT INTO venues (name, map_url, is_free, price, duration_num, duration_unit) VALUES (?, ?, ?, ?, ?, ?)", 
+                                 (manual_name, manual_url, int(man_is_free), man_price, man_num, man_unit))
+                    conn.commit()
+                    st.success("¡Añadido con éxito!")
+                except sqlite3.IntegrityError:
+                    st.error("El nombre ya existe")
+                conn.close()
+            else:
+                st.error("El nombre y el enlace son obligatorios.")
 
     st.divider()
 
     conn = sqlite3.connect(DB_NAME)
-    venues_list = pd.read_sql_query("SELECT name, map_url FROM venues", conn)
+    venues_list = pd.read_sql_query("SELECT * FROM venues", conn)
     
     if not venues_list.empty:
         st.subheader("🗑️ Eliminar campo")
@@ -215,7 +272,8 @@ elif menu == "🏟️ Gestionar Campos":
                 
         st.subheader("📍 Lista de campos guardados")
         for index, row in venues_list.iterrows():
-            st.markdown(f"- **{row['name']}** ([Ver mapa]({row['map_url']}))")
+            precio_str = formatear_precio(bool(row['is_free']), row['price'], row['duration_num'], row['duration_unit'])
+            st.markdown(f"- **{row['name']}** | 💰 {precio_str} | ([Ver mapa]({row['map_url']}))")
     else:
         st.info("No hay campos guardados.")
     conn.close()
@@ -271,7 +329,6 @@ elif menu == "⏳ Historial":
     conn = sqlite3.connect(DB_NAME)
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     
-    # Buscar todos los partidos cuya fecha ya pasó (时间已经过去的比赛), ordenados del más reciente al más antiguo
     query = "SELECT * FROM events WHERE event_datetime < ? ORDER BY event_datetime DESC"
     past_events_df = pd.read_sql_query(query, conn, params=(current_time,))
     
@@ -280,14 +337,12 @@ elif menu == "⏳ Historial":
         
         for index, row in past_events_df.iterrows():
             event_id = row['id']
-            # Creamos un bloque desplegable (expander) para cada partido
             with st.expander(f"📅 {row['event_datetime']} | 🏟️ {row['venue_name']}"):
                 regs_df = pd.read_sql_query(f"SELECT member_name FROM registrations WHERE event_id={event_id}", conn)
                 
                 st.markdown(f"**Total de participantes:** {len(regs_df)}")
                 
                 if not regs_df.empty:
-                    # Mostrar la lista de jugadores separados por comas
                     jugadores = regs_df['member_name'].tolist()
                     st.write("Jugadores: " + ", ".join(jugadores))
                 else:
