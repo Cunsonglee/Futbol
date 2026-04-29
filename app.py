@@ -72,8 +72,8 @@ st.sidebar.title("⚽ Menú")
 menu = st.sidebar.radio("Seleccione una opción", 
                         ["🏠 Inicio", 
                          "📅 Publicar Partido", 
-                         "🏟️ Gestionar Campos", 
-                         "👥 Gestionar Miembros", 
+                         "🥅 Gestionar Campos", 
+                         "🤼‍♂️ Gestionar Miembros", 
                          "⏳ Historial"])
 
 # ================= Página: Inicio (主页 - 下一场比赛) =================
