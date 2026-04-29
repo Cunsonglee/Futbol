@@ -34,7 +34,7 @@ def fetch_venue_name(url):
         return None
 
 def formatear_precio(is_free, price, num, unit):
-    """Formatear el texto del precio"""
+    """Formatear el texto del precio (处理免费和价格单位的复数显示)"""
     if is_free:
         return "Gratis"
     else:
@@ -43,13 +43,13 @@ def formatear_precio(is_free, price, num, unit):
             unit_str = "días" if unit == "día" else unit + "s"
         return f"{price:.2f} € / {num} {unit_str}"
 
-# ================= Configuración de la Base de Datos (数据库设置 V4) =================
+# ================= Configuración de la Base de Datos (数据库设置 V3) =================
 DB_NAME = 'football_v4.db' 
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS members (name TEXT UNIQUE, phone TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS members (name TEXT UNIQUE)''')
     c.execute('''CREATE TABLE IF NOT EXISTS venues 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                   name TEXT UNIQUE, 
@@ -110,6 +110,7 @@ if menu == "🏠 Inicio":
         st.divider()
         
         st.subheader("🙋‍♂️ Zona de Inscripción")
+        # 🔥 修改点：按字母 A-Z 升序读取成员名单
         members_df = pd.read_sql_query("SELECT name FROM members ORDER BY name ASC", conn)
         
         if not members_df.empty:
@@ -279,14 +280,11 @@ elif menu == "👥 Gestionar Miembros":
     
     with st.form("add_member_form"):
         new_member = st.text_input("Introduce el nombre del compañero")
-        # 🔥 明确标示为选填 (Opcional)
-        phone_number = st.text_input("Número de teléfono (Opcional, Ej: 612345678)")
-        
         if st.form_submit_button("Añadir miembro"):
             if new_member:
                 conn = sqlite3.connect(DB_NAME)
                 try:
-                    conn.execute("INSERT INTO members (name, phone) VALUES (?, ?)", (new_member, phone_number))
+                    conn.execute("INSERT INTO members (name) VALUES (?)", (new_member,))
                     conn.commit()
                     st.success(f"✅ Miembro añadido con éxito: {new_member}")
                 except sqlite3.IntegrityError:
@@ -298,7 +296,7 @@ elif menu == "👥 Gestionar Miembros":
     st.divider()
     
     conn = sqlite3.connect(DB_NAME)
-    current_members = pd.read_sql_query("SELECT name, phone FROM members ORDER BY name ASC", conn)
+    current_members = pd.read_sql_query("SELECT name FROM members ORDER BY name ASC", conn)
     
     if not current_members.empty:
         st.subheader("🗑️ Eliminar miembro")
@@ -313,16 +311,10 @@ elif menu == "👥 Gestionar Miembros":
             else:
                 st.warning("Por favor, selecciona un miembro primero")
                 
+        # 🔥 修改点：在这里动态计算并显示总人数
         st.subheader(f"🏃 Lista actual (Total: {len(current_members)})")
-        
-        # 🔥 更加智能的判空显示逻辑
-        for index, row in current_members.iterrows():
-            if pd.notna(row['phone']) and str(row['phone']).strip() != "":
-                telefono_str = str(row['phone']).strip()
-            else:
-                telefono_str = "No especificado"
-                
-            st.write(f"- **{row['name']}** | 📱 Tel: {telefono_str}")
+        for name in current_members['name']:
+            st.write(f"- {name}")
     else:
         st.info("No hay miembros actualmente.")
     conn.close()
