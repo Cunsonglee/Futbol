@@ -44,7 +44,7 @@ def formatear_precio(is_free, price, num, unit):
         return f"{price:.2f} € / {num} {unit_str}"
 
 # ================= Configuración de la Base de Datos (数据库设置 V3) =================
-DB_NAME = 'football_v3.db' # 升级数据库版本，添加价格字段
+DB_NAME = 'football_v4.db' # 升级数据库版本，添加价格字段
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
