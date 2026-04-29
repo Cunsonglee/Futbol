@@ -6,24 +6,21 @@ import requests
 from bs4 import BeautifulSoup
 import urllib.parse
 
-# 设置网页标题和图标
-st.set_page_config(page_title="周末足球俱乐部", page_icon="⚽", layout="centered")
+# Configuración de la página (设置网页标题和图标)
+st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
 
-# ================= 辅助函数：获取 Google 地图名称 =================
+# ================= Funciones Auxiliares (辅助函数：获取 Google 地图名称) =================
 def fetch_venue_name(url):
-    """优先从URL提取名称，如果失败再尝试抓取网页"""
-    # 1. 尝试直接从 URL 提取 (针对 /maps/place/场地名称/ 这种格式)
+    """Extraer nombre de la URL o intentar obtener el título de la página"""
     try:
         if "/place/" in url:
             part = url.split("/place/")[1].split("/")[0]
-            # 把 URL 编码的文字和加号转成正常的空格和文字
             name = urllib.parse.unquote(part).replace("+", " ")
             if name and "@" not in name:
                 return name
     except Exception:
         pass
 
-    # 2. 备用方案：尝试抓取网页标题
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(url, headers=headers, timeout=5)
@@ -36,8 +33,8 @@ def fetch_venue_name(url):
     except Exception as e:
         return None
 
-# ================= 数据库设置 =================
-DB_NAME = 'football_v2.db' # 更改了数据库名称，避免旧数据冲突
+# ================= Configuración de la Base de Datos (数据库设置) =================
+DB_NAME = 'football_v2.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -54,16 +51,25 @@ def init_db():
 
 init_db()
 
-# ================= 侧边栏导航 =================
-st.sidebar.title("⚽ 菜单栏")
-menu = st.sidebar.radio("请选择操作", ["🏠 主页 - 下一场比赛", "📅 发布新比赛", "🏟️ 管理球场", "👥 管理成员"])
+# ================= Menú Lateral (侧边栏导航) =================
+st.sidebar.title("⚽ Menú")
+menu = st.sidebar.radio("Seleccione una opción", 
+                        ["🏠 Inicio", 
+                         "📅 Publicar Partido", 
+                         "🏟️ Gestionar Campos", 
+                         "👥 Gestionar Miembros", 
+                         "⏳ Historial"])
 
-# ================= 页面：主页 =================
-if menu == "🏠 主页 - 下一场比赛":
-    st.title("⚽ 周末足球俱乐部")
+# ================= Página: Inicio (主页 - 下一场比赛) =================
+if menu == "🏠 Inicio":
+    st.title("⚽ Club de Fútbol de Fin de Semana")
     
     conn = sqlite3.connect(DB_NAME)
-    event_df = pd.read_sql_query("SELECT * FROM events ORDER BY id DESC LIMIT 1", conn)
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+    
+    # Buscar el próximo partido (时间大于等于现在的比赛)
+    query = "SELECT * FROM events WHERE event_datetime >= ? ORDER BY event_datetime ASC LIMIT 1"
+    event_df = pd.read_sql_query(query, conn, params=(current_time,))
     
     if not event_df.empty:
         event_id = event_df['id'][0]
@@ -71,72 +77,72 @@ if menu == "🏠 主页 - 下一场比赛":
         venue_name = event_df['venue_name'][0]
         map_url = event_df['map_url'][0]
         
-        st.subheader("📅 下一次活动信息")
-        st.info(f"**⏰ 时间:** {event_datetime}\n\n**🏟️ 场地:** {venue_name}")
+        st.subheader("📅 Información del Próximo Partido")
+        st.info(f"**⏰ Fecha y Hora:** {event_datetime}\n\n**🏟️ Campo:** {venue_name}")
         if map_url:
-            st.markdown(f"📍 **[点击这里在 Google 地图中打开]({map_url})**")
+            st.markdown(f"📍 **[Haz clic aquí para abrir en Google Maps]({map_url})**")
             
         st.divider()
         
-        st.subheader("🙋‍♂️ 报名区")
+        st.subheader("🙋‍♂️ Zona de Inscripción")
         members_df = pd.read_sql_query("SELECT name FROM members", conn)
         
         if not members_df.empty:
             member_list = members_df['name'].tolist()
-            selected_member = st.selectbox("请选择你的名字进行报名：", ["-- 请选择 --"] + member_list)
+            selected_member = st.selectbox("Selecciona tu nombre para inscribirte:", ["-- Seleccionar --"] + member_list)
             
-            if st.button("报名 / 取消报名", type="primary"):
-                if selected_member == "-- 请选择 --":
-                    st.warning("请先选择你的名字！")
+            if st.button("Inscribirse / Cancelar Inscripción", type="primary"):
+                if selected_member == "-- Seleccionar --":
+                    st.warning("¡Por favor, selecciona tu nombre primero!")
                 else:
                     c = conn.cursor()
                     c.execute("SELECT * FROM registrations WHERE event_id=? AND member_name=?", (int(event_id), selected_member))
                     if c.fetchone():
                         c.execute("DELETE FROM registrations WHERE event_id=? AND member_name=?", (int(event_id), selected_member))
-                        st.warning(f"{selected_member} 已取消报名。")
+                        st.warning(f"Se ha cancelado la inscripción de {selected_member}.")
                     else:
                         c.execute("INSERT INTO registrations (event_id, member_name) VALUES (?, ?)", (int(event_id), selected_member))
-                        st.success(f"{selected_member} 报名成功！")
+                        st.success(f"¡{selected_member} se ha inscrito con éxito!")
                     conn.commit()
                     st.rerun()
         else:
-            st.warning("目前没有成员，请先到“管理成员”添加同事！")
+            st.warning("No hay miembros actualmente. ¡Añade compañeros en 'Gestionar Miembros'!")
             
         st.divider()
         regs_df = pd.read_sql_query(f"SELECT member_name FROM registrations WHERE event_id={event_id}", conn)
-        st.subheader(f"🏃‍♂️ 总共报名人数: {len(regs_df)} 人")
+        st.subheader(f"🏃‍♂️ Total de inscritos: {len(regs_df)} personas")
         
         if not regs_df.empty:
             for index, row in regs_df.iterrows():
                 st.write(f"✅ {row['member_name']}")
         else:
-            st.write("还没有人报名，快来抢沙发！")
+            st.write("Aún no hay inscritos. ¡Sé el primero!")
             
     else:
-        st.info("目前没有安排任何比赛。请到“发布新比赛”页面安排活动。")
+        st.info("Actualmente no hay partidos programados. Ve a 'Publicar Partido' para organizar uno.")
     conn.close()
 
-# ================= 页面：发布新比赛 =================
-elif menu == "📅 发布新比赛":
-    st.title("📅 安排下一场比赛")
+# ================= Página: Publicar Partido (发布新比赛) =================
+elif menu == "📅 Publicar Partido":
+    st.title("📅 Programar Siguiente Partido")
     
     conn = sqlite3.connect(DB_NAME)
     venues_df = pd.read_sql_query("SELECT * FROM venues", conn)
     
     if venues_df.empty:
-        st.warning("⚠️ 目前还没有保存任何场地。请先去“🏟️ 管理球场”添加场地！")
+        st.warning("⚠️ Todavía no hay campos guardados. ¡Ve a '🏟️ Gestionar Campos' para añadir uno!")
     else:
         venue_list = venues_df['name'].tolist()
         
         with st.form("add_event_form"):
             col1, col2 = st.columns(2)
             with col1:
-                event_date = st.date_input("比赛日期")
+                event_date = st.date_input("Fecha del partido")
             with col2:
-                event_time = st.time_input("比赛时间")
+                event_time = st.time_input("Hora del partido")
                 
-            selected_venue = st.selectbox("选择场地", venue_list)
-            submit_event = st.form_submit_button("发布比赛")
+            selected_venue = st.selectbox("Seleccionar campo", venue_list)
+            submit_event = st.form_submit_button("Publicar Partido")
             
             if submit_event:
                 datetime_str = f"{event_date.strftime('%Y-%m-%d')} {event_time.strftime('%H:%M')}"
@@ -146,19 +152,18 @@ elif menu == "📅 发布新比赛":
                 c.execute("INSERT INTO events (event_datetime, venue_name, map_url) VALUES (?, ?, ?)", 
                           (datetime_str, selected_venue, map_url))
                 conn.commit()
-                st.success("✅ 比赛发布成功！去主页看看吧。")
+                st.success("✅ ¡Partido publicado con éxito! Revisa la pestaña de Inicio.")
     conn.close()
 
-# ================= 页面：管理球场 =================
-elif menu == "🏟️ 管理球场":
-    st.title("🏟️ 球队常驻球场")
+# ================= Página: Gestionar Campos (管理球场) =================
+elif menu == "🏟️ Gestionar Campos":
+    st.title("🏟️ Campos de Fútbol")
     
-    # --- 添加场地 ---
-    st.subheader("✨ 添加新场地")
-    auto_url = st.text_input("输入 Google 地图链接", placeholder="https://www.google.com/maps/place/...")
-    if st.button("自动抓取并保存", type="primary"):
+    st.subheader("✨ Añadir nuevo campo")
+    auto_url = st.text_input("Introduce el enlace de Google Maps", placeholder="https://www.google.com/maps/place/...")
+    if st.button("Extraer y guardar automáticamente", type="primary"):
         if auto_url:
-            with st.spinner("正在获取场地信息..."):
+            with st.spinner("Obteniendo información del campo..."):
                 venue_name = fetch_venue_name(auto_url)
                 if venue_name:
                     conn = sqlite3.connect(DB_NAME)
@@ -166,99 +171,128 @@ elif menu == "🏟️ 管理球场":
                     try:
                         c.execute("INSERT INTO venues (name, map_url) VALUES (?, ?)", (venue_name, auto_url))
                         conn.commit()
-                        st.success(f"✅ 成功添加场地：**{venue_name}**")
+                        st.success(f"✅ Campo añadido con éxito: **{venue_name}**")
                     except sqlite3.IntegrityError:
-                        st.error("⚠️ 该场地名称已存在！")
+                        st.error("⚠️ ¡Este nombre de campo ya existe!")
                     finally:
                         conn.close()
                 else:
-                    st.error("❌ 无法自动获取，请展开下方使用手动添加。")
+                    st.error("❌ No se pudo obtener automáticamente, usa la opción manual abajo.")
         else:
-            st.warning("请先输入链接！")
+            st.warning("¡Por favor, introduce el enlace primero!")
 
-    with st.expander("🛠️ 手动添加场地"):
+    with st.expander("🛠️ Añadir campo manualmente"):
         with st.form("manual_venue_form"):
-            manual_name = st.text_input("手动输入场地名称")
-            manual_url = st.text_input("手动输入地图链接")
-            if st.form_submit_button("保存"):
+            manual_name = st.text_input("Nombre del campo (Manual)")
+            manual_url = st.text_input("Enlace del mapa (Manual)")
+            if st.form_submit_button("Guardar"):
                 if manual_name and manual_url:
                     conn = sqlite3.connect(DB_NAME)
                     try:
                         conn.execute("INSERT INTO venues (name, map_url) VALUES (?, ?)", (manual_name, manual_url))
                         conn.commit()
-                        st.success("添加成功！")
+                        st.success("¡Añadido con éxito!")
                     except sqlite3.IntegrityError:
-                        st.error("名称已存在")
+                        st.error("El nombre ya existe")
                     conn.close()
 
     st.divider()
 
-    # --- 删除场地 ---
     conn = sqlite3.connect(DB_NAME)
     venues_list = pd.read_sql_query("SELECT name, map_url FROM venues", conn)
     
     if not venues_list.empty:
-        st.subheader("🗑️ 删除场地")
-        venue_to_delete = st.selectbox("选择要删除的场地", ["--请选择--"] + venues_list['name'].tolist())
-        if st.button("删除选中的场地", type="primary"):
-            if venue_to_delete != "--请选择--":
+        st.subheader("🗑️ Eliminar campo")
+        venue_to_delete = st.selectbox("Selecciona el campo a eliminar", ["--Seleccionar--"] + venues_list['name'].tolist())
+        if st.button("Eliminar campo seleccionado", type="primary"):
+            if venue_to_delete != "--Seleccionar--":
                 conn.execute("DELETE FROM venues WHERE name=?", (venue_to_delete,))
                 conn.commit()
-                st.success(f"已删除场地: {venue_to_delete}")
-                st.rerun() # 刷新页面更新列表
+                st.success(f"Campo eliminado: {venue_to_delete}")
+                st.rerun()
             else:
-                st.warning("请先选择一个场地")
+                st.warning("Por favor, selecciona un campo primero")
                 
-        st.subheader("📍 已保存的场地列表")
+        st.subheader("📍 Lista de campos guardados")
         for index, row in venues_list.iterrows():
-            st.markdown(f"- **{row['name']}** ([查看地图]({row['map_url']}))")
+            st.markdown(f"- **{row['name']}** ([Ver mapa]({row['map_url']}))")
     else:
-        st.info("暂无保存的场地。")
+        st.info("No hay campos guardados.")
     conn.close()
 
-# ================= 页面：管理成员 =================
-elif menu == "👥 管理成员":
-    st.title("👥 管理球队成员")
+# ================= Página: Gestionar Miembros (管理成员) =================
+elif menu == "👥 Gestionar Miembros":
+    st.title("👥 Gestionar Miembros del Equipo")
     
-    # --- 添加成员 ---
     with st.form("add_member_form"):
-        new_member = st.text_input("输入要添加的同事姓名")
-        if st.form_submit_button("添加成员"):
+        new_member = st.text_input("Introduce el nombre del compañero")
+        if st.form_submit_button("Añadir miembro"):
             if new_member:
                 conn = sqlite3.connect(DB_NAME)
                 try:
                     conn.execute("INSERT INTO members (name) VALUES (?)", (new_member,))
                     conn.commit()
-                    st.success(f"✅ 成功添加成员: {new_member}")
+                    st.success(f"✅ Miembro añadido con éxito: {new_member}")
                 except sqlite3.IntegrityError:
-                    st.error("⚠️ 该成员已存在！")
+                    st.error("⚠️ ¡Este miembro ya existe!")
                 conn.close()
             else:
-                st.error("姓名不能为空！")
+                st.error("¡El nombre no puede estar vacío!")
                 
     st.divider()
     
-    # --- 删除成员 ---
     conn = sqlite3.connect(DB_NAME)
     current_members = pd.read_sql_query("SELECT name FROM members", conn)
     
     if not current_members.empty:
-        st.subheader("🗑️ 删除成员")
-        member_to_delete = st.selectbox("选择要删除的成员", ["--请选择--"] + current_members['name'].tolist())
-        if st.button("删除选中的成员", type="primary"):
-            if member_to_delete != "--请选择--":
+        st.subheader("🗑️ Eliminar miembro")
+        member_to_delete = st.selectbox("Selecciona el miembro a eliminar", ["--Seleccionar--"] + current_members['name'].tolist())
+        if st.button("Eliminar miembro seleccionado", type="primary"):
+            if member_to_delete != "--Seleccionar--":
                 conn.execute("DELETE FROM members WHERE name=?", (member_to_delete,))
-                # 同时删除该成员所有的报名记录
                 conn.execute("DELETE FROM registrations WHERE member_name=?", (member_to_delete,))
                 conn.commit()
-                st.success(f"已删除成员: {member_to_delete}")
-                st.rerun() # 刷新页面
+                st.success(f"Miembro eliminado: {member_to_delete}")
+                st.rerun()
             else:
-                st.warning("请先选择一个成员")
+                st.warning("Por favor, selecciona un miembro primero")
                 
-        st.subheader("🏃 当前名单")
+        st.subheader("🏃 Lista actual")
         for name in current_members['name']:
             st.write(f"- {name}")
     else:
-        st.info("目前没有成员。")
+        st.info("No hay miembros actualmente.")
+    conn.close()
+
+# ================= Página: Historial (历史记录) =================
+elif menu == "⏳ Historial":
+    st.title("⏳ Historial de Partidos")
+    
+    conn = sqlite3.connect(DB_NAME)
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+    
+    # Buscar todos los partidos cuya fecha ya pasó (时间已经过去的比赛), ordenados del más reciente al más antiguo
+    query = "SELECT * FROM events WHERE event_datetime < ? ORDER BY event_datetime DESC"
+    past_events_df = pd.read_sql_query(query, conn, params=(current_time,))
+    
+    if not past_events_df.empty:
+        st.write("Aquí puedes ver los partidos pasados y quiénes participaron:")
+        
+        for index, row in past_events_df.iterrows():
+            event_id = row['id']
+            # Creamos un bloque desplegable (expander) para cada partido
+            with st.expander(f"📅 {row['event_datetime']} | 🏟️ {row['venue_name']}"):
+                regs_df = pd.read_sql_query(f"SELECT member_name FROM registrations WHERE event_id={event_id}", conn)
+                
+                st.markdown(f"**Total de participantes:** {len(regs_df)}")
+                
+                if not regs_df.empty:
+                    # Mostrar la lista de jugadores separados por comas
+                    jugadores = regs_df['member_name'].tolist()
+                    st.write("Jugadores: " + ", ".join(jugadores))
+                else:
+                    st.write("Nadie se inscribió en este partido.")
+    else:
+        st.info("Aún no hay partidos en el historial.")
+        
     conn.close()
