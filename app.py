@@ -44,13 +44,12 @@ def formatear_precio(is_free, price, num, unit):
         return f"{price:.2f} € / {num} {unit_str}"
 
 # ================= Configuración de la Base de Datos (数据库设置 V3) =================
-DB_NAME = 'football_v4.db' # 升级数据库版本，添加价格字段
+DB_NAME = 'football_v4.db' 
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS members (name TEXT UNIQUE)''')
-    # 新增了 is_free, price, duration_num, duration_unit 字段
     c.execute('''CREATE TABLE IF NOT EXISTS venues 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                   name TEXT UNIQUE, 
@@ -93,7 +92,6 @@ if menu == "🏠 Inicio":
         venue_name = event_df['venue_name'][0]
         map_url = event_df['map_url'][0]
         
-        # 获取场地的价格信息
         venue_info = pd.read_sql_query("SELECT is_free, price, duration_num, duration_unit FROM venues WHERE name=?", conn, params=(venue_name,))
         texto_precio = "No especificado"
         if not venue_info.empty:
@@ -104,7 +102,6 @@ if menu == "🏠 Inicio":
             texto_precio = formatear_precio(v_free, v_price, v_num, v_unit)
         
         st.subheader("📅 Información del Próximo Partido")
-        # 显示时间、场地和价格
         st.info(f"**⏰ Fecha y Hora:** {event_datetime}\n\n**🏟️ Campo:** {venue_name}\n\n**💰 Precio:** {texto_precio}")
         
         if map_url:
@@ -113,7 +110,8 @@ if menu == "🏠 Inicio":
         st.divider()
         
         st.subheader("🙋‍♂️ Zona de Inscripción")
-        members_df = pd.read_sql_query("SELECT name FROM members", conn)
+        # 🔥 修改点：按字母 A-Z 升序读取成员名单
+        members_df = pd.read_sql_query("SELECT name FROM members ORDER BY name ASC", conn)
         
         if not members_df.empty:
             member_list = members_df['name'].tolist()
@@ -190,7 +188,6 @@ elif menu == "🏟️ Gestionar Campos":
     st.subheader("✨ Añadir nuevo campo")
     auto_url = st.text_input("Introduce el enlace de Google Maps", placeholder="https://www.google.com/maps/place/...")
     
-    # 价格设置区域
     st.markdown("💰 **Configuración de Precio**")
     auto_is_free = st.checkbox("Gratis (Gratuito)", key="auto_free")
     
@@ -224,7 +221,6 @@ elif menu == "🏟️ Gestionar Campos":
             st.warning("¡Por favor, introduce el enlace primero!")
 
     with st.expander("🛠️ Añadir campo manualmente"):
-        # 注意：这里去掉了 st.form，因为 form 内部不支持 disabled 实时更新
         manual_name = st.text_input("Nombre del campo (Manual)")
         manual_url = st.text_input("Enlace del mapa (Manual)")
         
@@ -300,7 +296,8 @@ elif menu == "👥 Gestionar Miembros":
     st.divider()
     
     conn = sqlite3.connect(DB_NAME)
-    current_members = pd.read_sql_query("SELECT name FROM members", conn)
+    # 🔥 修改点：按字母 A-Z 升序读取成员名单用于显示和删除
+    current_members = pd.read_sql_query("SELECT name FROM members ORDER BY name ASC", conn)
     
     if not current_members.empty:
         st.subheader("🗑️ Eliminar miembro")
