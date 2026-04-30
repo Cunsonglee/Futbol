@@ -183,7 +183,7 @@ elif menu == "📅 Publicar Partido":
 
 # ================= Página: Gestionar Campos (管理球场) =================
 elif menu == "🥅 Gestionar Campos":
-    st.title("🏟️ Campos de Fútbol")
+    st.title("🥅 Campos de Fútbol")
     
     st.subheader("✨ Añadir nuevo campo")
     auto_url = st.text_input("Introduce el enlace de Google Maps", placeholder="https://www.google.com/maps/place/...")
