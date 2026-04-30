@@ -156,7 +156,7 @@ elif menu == "📅 Publicar Partido":
     venues_df = pd.read_sql_query("SELECT * FROM venues", conn)
     
     if venues_df.empty:
-        st.warning("⚠️ Todavía no hay campos guardados. ¡Ve a '🏟️ Gestionar Campos' para añadir uno!")
+        st.warning("⚠️ Todavía no hay campos guardados. ¡Ve a '🥅 Gestionar Campos' para añadir uno!")
     else:
         venue_list = venues_df['name'].tolist()
         
@@ -182,7 +182,7 @@ elif menu == "📅 Publicar Partido":
     conn.close()
 
 # ================= Página: Gestionar Campos (管理球场) =================
-elif menu == "🏟️ Gestionar Campos":
+elif menu == "🥅 Gestionar Campos":
     st.title("🏟️ Campos de Fútbol")
     
     st.subheader("✨ Añadir nuevo campo")
@@ -275,8 +275,8 @@ elif menu == "🏟️ Gestionar Campos":
     conn.close()
 
 # ================= Página: Gestionar Miembros (管理成员) =================
-elif menu == "👥 Gestionar Miembros":
-    st.title("👥 Gestionar Miembros del Equipo")
+elif menu == "🤼‍♂️ Gestionar Miembros":
+    st.title("🤼‍♂️ Gestionar Miembros del Equipo")
     
     with st.form("add_member_form"):
         new_member = st.text_input("Introduce el nombre del compañero")
