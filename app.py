@@ -157,32 +157,36 @@ elif menu == "🏠 Inicio":
             member_list = sorted(df_m['name'].tolist()) if not df_m.empty else []
             sel = st.selectbox("Tu nombre", ["-- Seleccionar --"] + member_list)
             
-# --- 建议替换 app.py 中对应的报名逻辑代码 ---
+# --- 找到首页报名按钮点击后的逻辑，修改为以下内容 ---
 if st.button("Inscribirse / Cancelar", type="primary"):
     if sel != "-- Seleccionar --":
-        # 1. 确保读取到的 players 是字符串，处理空值
-        raw_players = str(event.get('players', ""))
-        if raw_players == "nan" or not raw_players:
-            players = []
-        else:
-            players = [p.strip() for p in raw_players.split(",") if p.strip()]
+        # 1. 获取当前球员列表，处理各种空值情况
+        raw_players = event.get('players', "")
         
-        # 2. 执行报名或取消
+        # 确保 raw_players 是字符串，如果是 NaN (float) 则转为空串
+        if pd.isna(raw_players):
+            raw_players = ""
+        else:
+            raw_players = str(raw_players)
+            
+        players = [p.strip() for p in raw_players.split(",") if p.strip()]
+        
+        # 2. 增加或移除成员
         if sel in players:
             players.remove(sel)
         else:
             players.append(sel)
         
-        # 3. 将列表转回逗号分隔的字符串
+        # 核心修复：强制将 players 列转换为对象/字符串类型，防止 TypeError
+        df_e['players'] = df_e['players'].astype(object) 
+        
+        # 3. 写入新数据
         df_e.at[idx, 'players'] = ",".join(players)
         
         # 4. 保存并刷新[cite: 2]
-        try:
-            save_sheet_data(URL_E, df_e)
-            st.success(f"¡Lista actualizada para {sel}!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error al guardar en Google Sheets: {e}")
+        save_sheet_data(URL_E, df_e)
+        st.success(f"Actualizado: {sel}")
+        st.rerun()
 
 # ================= ⏳ 历史记录 =================
 elif menu == "⏳ Historial":
