@@ -5,6 +5,9 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
+import pytz # 确保 requirements.txt 里有 pytz
+
+
 
 # ================= 1. 基础配置 =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
@@ -163,13 +166,17 @@ elif menu == "🏠 Inicio":
     df_m = load_sheet_data(URL_M)
     df_c = load_sheet_data(URL_C)
     
-    if not df_e.empty and 'datetime' in df_e.columns:
-        # 2. 获取当前系统精确时间 (格式需与表格一致)
-        now = datetime.now().strftime('%Y-%m-%d %H:%M')
+if not df_e.empty and 'datetime' in df_e.columns:
+        # --- 核心修改开始 ---
+        # 1. 设置为你当地的时区（例如西班牙）
+        tz = pytz.timezone('Europe/Madrid') 
+        # 2. 获取当前的精确时间，格式为 YYYY-MM-DD HH:MM
+        now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
         
-        # 3. 核心修改：筛选“大于或等于现在”的比赛
-        # 这会自动过滤掉所有已经过去的比赛
+        # 3. 强制表格的时间字符串也只取前16位（即 YYYY-MM-DD HH:MM），防止秒数干扰
+        # 同时确保使用字符串对比
         future_events = df_e[df_e['datetime'].str[:16] >= now].sort_values("datetime")
+        # --- 核心修改结束 ---
         
         if not future_events.empty:
             # 获取最近的一场未来比赛
