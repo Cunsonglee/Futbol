@@ -238,9 +238,10 @@ elif menu == "⏳ Historial":
     # 1. 实时读取比赛数据
     df_e = load_sheet_data(URL_E)
     
-    if not df_e.empty and 'datetime' in df_e.columns:
-        # 2. 获取当前系统时间
-        now = datetime.now().strftime('%Y-%m-%d %H:%M')
+if not df_e.empty and 'datetime' in df_e.columns:
+        # --- 核心修改开始 ---
+        tz = pytz.timezone('Europe/Madrid')
+        now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
         
         # 3. 筛选已经过去的比赛（时间小于现在），并按时间倒序排列（最近的排最前）
         past_events = df_e[df_e['datetime'].str[:16] < now].sort_values("datetime", ascending=False)
