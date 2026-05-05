@@ -9,30 +9,31 @@ import urllib.parse
 # ================= 1. 基础配置 =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
 
-# 修改连接定义方式
+# 建立连接
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 定义三个表格的 URL (替换为你自己的 edit 链接)
+# --- 使用你提供的正确 URL ---
 URL_M = "https://docs.google.com/spreadsheets/d/1tjTojyme8N-CaEdcewJHBwTPyDqbtF6JvWsz-Ej3HPU/edit"
 URL_C = "https://docs.google.com/spreadsheets/d/1UWb__avGXO5wxIJLrqRh14zhDwMbqFTX38O-zBsDaPs/edit"
 URL_E = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
 
-# 修改读取数据的函数
-def get_data(url):
+def load_sheet_data(url):
+    """实时读取数据，清除空行"""
     return conn.read(spreadsheet=url, ttl=0).dropna(how="all")
 
-# 修改保存数据的函数
-def save_data(url, df):
+def save_sheet_data(url, df):
+    """保存数据到 Google Sheets[cite: 2]"""
     conn.update(spreadsheet=url, data=df)
 
-# ================= 2. 辅助函数 (保持不变) =================
+# ================= 2. 辅助函数 (爬虫与格式化) =================
 def fetch_venue_name(url):
+    """自动抓取球场名[cite: 2]"""
     try:
         if "/place/" in url:
             part = url.split("/place/")[1].split("/")[0]
             name = urllib.parse.unquote(part).replace("+", " ")
             if name and "@" not in name: return name
-    except Exception: pass
+    except: pass
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
@@ -42,6 +43,7 @@ def fetch_venue_name(url):
     except: return None
 
 def formatear_precio(is_free, price, num, unit):
+    """价格显示逻辑[cite: 2]"""
     if is_free or is_free == 1: return "Gratis"
     try:
         unit_str = "días" if (num > 1 and unit == "día") else (unit + "s" if num > 1 else unit)
@@ -60,8 +62,7 @@ if menu == "🤼‍♂️ Miembros":
         new_name = st.text_input("Nombre del compañero")
         if st.form_submit_button("Añadir"):
             if new_name and ('name' not in df_m.columns or new_name not in df_m['name'].values):
-                new_entry = pd.DataFrame([{"name": new_name}])
-                df_m = pd.concat([df_m, new_entry], ignore_index=True)
+                df_m = pd.concat([df_m, pd.DataFrame([{"name": new_name}])], ignore_index=True)
                 save_sheet_data(URL_M, df_m)
                 st.success(f"Added: {new_name}")
                 st.rerun()
@@ -169,7 +170,7 @@ elif menu == "🏠 Inicio":
         else:
             st.write("No hay partidos programados.")
     else:
-        st.write("Configura tus tablas en Google Sheets con los encabezados correctos.")
+        st.info("No hay datos de partidos.")
 
 # ================= ⏳ 历史记录 =================
 elif menu == "⏳ Historial":
