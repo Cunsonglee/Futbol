@@ -207,14 +207,44 @@ elif menu == "🏠 Inicio":
     else:
         st.warning("No hay datos de partidos o la tabla está mal configurada.")
 
-# ================= ⏳ 历史记录 =================
+# ================= ⏳ Página: Historial (历史记录 - 显示日期和时间) =================
 elif menu == "⏳ Historial":
-    st.title("⏳ Historial")
+    st.title("⏳ Historial de Partidos")
+    
+    # 1. 实时读取比赛数据
     df_e = load_sheet_data(URL_E)
+    
     if not df_e.empty and 'datetime' in df_e.columns:
+        # 2. 获取当前系统时间
         now = datetime.now().strftime('%Y-%m-%d %H:%M')
-        past = df_e[df_e['datetime'] < now].sort_values("datetime", ascending=False)
-        for i, row in past.iterrows():
-            with st.expander(f"📅 {row['datetime']} - {row['venue']}"):
-                p_list = str(row['players']).split(",") if row['players'] and str(row['players']) != "nan" else []
-                st.write(f"Participantes ({len(p_list)}): {', '.join(p_list)}")
+        
+        # 3. 筛选已经过去的比赛（时间小于现在），并按时间倒序排列（最近的排最前）
+        past_events = df_e[df_e['datetime'] < now].sort_values("datetime", ascending=False)
+        
+        if not past_events.empty:
+            st.write("Aquí puedes ver los partidos pasados y quiénes participaron:")
+            
+            for i, row in past_events.iterrows():
+                # 直接显示 row['datetime']，它包含了日期和时间[cite: 2]
+                event_label = f"📅 {row['datetime']} | 🏟️ {row['venue']}"
+                
+                with st.expander(event_label):
+                    # 4. 解析报名名单字符串[cite: 2]
+                    raw_p = str(row.get('players', ""))
+                    if raw_p == "nan" or not raw_p.strip():
+                        players_list = []
+                    else:
+                        players_list = [p.strip() for p in raw_p.split(",") if p.strip()]
+                    
+                    # 5. 显示参与详情[cite: 2]
+                    st.markdown(f"**Total de participantes:** {len(players_list)}")
+                    
+                    if players_list:
+                        # 用逗号连接名字并显示
+                        st.write("🏃 Jugadores: " + ", ".join(players_list))
+                    else:
+                        st.write("Nadie se inscribió en este partido.")
+        else:
+            st.info("Aún no hay partidos en el historial.")
+    else:
+        st.info("No hay datos de partidos grabados.")
