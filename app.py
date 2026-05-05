@@ -109,24 +109,51 @@ elif menu == "🥅 Campos":
                 save_sheet_data(URL_C, df_c)
                 st.rerun()
 
-# ================= 📅 发布比赛 =================
+# ================= 📅 Página: Publicar Partido (发布比赛) =================
 elif menu == "📅 Publicar":
     st.title("📅 Programar Partido")
+    
+    # 读取球场数据和比赛数据
     df_c = load_sheet_data(URL_C)
     df_e = load_sheet_data(URL_E)
     
     if df_c.empty:
-        st.warning("Añade un campo primero.")
+        st.warning("⚠️ Todavía no hay campos guardados. ¡Ve a '🥅 Campos' para añadir uno!")[cite: 2]
     else:
-        with st.form("pub"):
-            date = st.date_input("Fecha")
-            time = st.time_input("Hora")
-            venue = st.selectbox("Campo", df_c['name'].tolist())
-            if st.form_submit_button("Publicar"):
-                new_e = {"datetime": f"{date} {time}", "venue": venue, "players": ""}
-                df_e = pd.concat([df_e, pd.DataFrame([new_e])], ignore_index=True)
-                save_sheet_data(URL_E, df_e)
-                st.success("¡Partido publicado!")
+        venue_list = df_c['name'].tolist()[cite: 2]
+        
+        with st.form("pub_form"):
+            col1, col2 = st.columns(2)[cite: 2]
+            with col1:
+                event_date = st.date_input("Fecha del partido")[cite: 2]
+            with col2:
+                event_time = st.time_input("Hora del partido")[cite: 2]
+                
+            selected_venue = st.selectbox("Seleccionar campo", venue_list)[cite: 2]
+            submit_event = st.form_submit_button("Publicar Partido")[cite: 2]
+            
+            if submit_event:
+                # 核心修改：将日期和时间格式化为统一的字符串 (YYYY-MM-DD HH:MM)
+                # 这样可以确保 Historial 页面能按分钟精确对比时间
+                datetime_str = f"{event_date.strftime('%Y-%m-%d')} {event_time.strftime('%H:%M')}"[cite: 2]
+                
+                # 创建新比赛条目，初始报名人数为空字符串
+                new_e = {
+                    "datetime": datetime_str, 
+                    "venue": selected_venue, 
+                    "players": ""
+                }[cite: 2]
+                
+                # 合并数据并保存到 Google Sheets
+                df_e = pd.concat([df_e, pd.DataFrame([new_e])], ignore_index=True)[cite: 2]
+                
+                try:
+                    save_sheet_data(URL_E, df_e)[cite: 2]
+                    st.success(f"✅ ¡Partido publicado con éxito para el {datetime_str}!")[cite: 2]
+                    # 发布后自动跳转或刷新，以便在首页看到
+                    st.rerun()[cite: 2]
+                except Exception as e:
+                    st.error(f"❌ Error al guardar en Google Sheets: {e}")[cite: 2]
 
 # ================= 🏠 Página: Inicio (主页 - 报名与展示) =================
 elif menu == "🏠 Inicio":
