@@ -25,9 +25,8 @@ def get_data(url):
 def save_data(url, df):
     conn.update(spreadsheet=url, data=df)
 
-# ================= 2. 辅助函数 (保留原逻辑) =================
+# ================= 2. 辅助函数 (保持不变) =================
 def fetch_venue_name(url):
-    """提取球场名称"""
     try:
         if "/place/" in url:
             part = url.split("/place/")[1].split("/")[0]
@@ -43,14 +42,11 @@ def fetch_venue_name(url):
     except: return None
 
 def formatear_precio(is_free, price, num, unit):
-    """格式化价格显示"""
     if is_free or is_free == 1: return "Gratis"
-    unit_str = "días" if (num > 1 and unit == "día") else (unit + "s" if num > 1 else unit)
-    return f"{float(price):.2f} € / {int(num)} {unit_str}"
-
-def get_data(conn):
-    """实时读取数据[cite: 2]"""
-    return conn.read(ttl=0).dropna(how="all")
+    try:
+        unit_str = "días" if (num > 1 and unit == "día") else (unit + "s" if num > 1 else unit)
+        return f"{float(price):.2f} € / {int(num)} {unit_str}"
+    except: return "No especificado"
 
 # ================= 3. 导航菜单 =================
 menu = st.sidebar.radio("Seleccione", ["🏠 Inicio", "📅 Publicar", "🥅 Campos", "🤼‍♂️ Miembros", "⏳ Historial"])
@@ -58,32 +54,33 @@ menu = st.sidebar.radio("Seleccione", ["🏠 Inicio", "📅 Publicar", "🥅 Cam
 # ================= 🤼‍♂️ 成员管理 =================
 if menu == "🤼‍♂️ Miembros":
     st.title("🤼‍♂️ Miembros")
-    df_m = get_data(conn_m)
+    df_m = load_sheet_data(URL_M)
     
     with st.form("add_member"):
         new_name = st.text_input("Nombre del compañero")
         if st.form_submit_button("Añadir"):
-            if new_name and new_name not in df_m['name'].values:
-                df_m = pd.concat([df_m, pd.DataFrame([{"name": new_name}])], ignore_index=True)
-                conn_m.update(data=df_m)
+            if new_name and ('name' not in df_m.columns or new_name not in df_m['name'].values):
+                new_entry = pd.DataFrame([{"name": new_name}])
+                df_m = pd.concat([df_m, new_entry], ignore_index=True)
+                save_sheet_data(URL_M, df_m)
                 st.success(f"Added: {new_name}")
                 st.rerun()
     
     st.subheader(f"Lista Actual (Total: {len(df_m)})")
-    for i, row in df_m.sort_values("name").iterrows():
-        c1, c2 = st.columns([4,1])
-        c1.write(f"- {row['name']}")
-        if c2.button("🗑️", key=f"m_{i}"):
-            df_m = df_m.drop(i)
-            conn_m.update(data=df_m)
-            st.rerun()
+    if not df_m.empty and 'name' in df_m.columns:
+        for i, row in df_m.sort_values("name").iterrows():
+            c1, c2 = st.columns([4,1])
+            c1.write(f"- {row['name']}")
+            if c2.button("🗑️", key=f"m_{i}"):
+                df_m = df_m.drop(i)
+                save_sheet_data(URL_M, df_m)
+                st.rerun()
 
 # ================= 🥅 球场管理 =================
 elif menu == "🥅 Campos":
     st.title("🥅 Campos")
-    df_c = get_data(conn_c)
+    df_c = load_sheet_data(URL_C)
     
-    # 自动添加逻辑[cite: 2]
     auto_url = st.text_input("Enlace de Google Maps")
     is_free = st.checkbox("Gratis")
     col1, col2, col3 = st.columns(3)
@@ -97,24 +94,25 @@ elif menu == "🥅 Campos":
             new_row = {"name": v_name, "map_url": auto_url, "is_free": int(is_free), 
                        "price": p, "duration_num": n, "duration_unit": u}
             df_c = pd.concat([df_c, pd.DataFrame([new_row])], ignore_index=True)
-            conn_c.update(data=df_c)
+            save_sheet_data(URL_C, df_c)
             st.success(f"Guardado: {v_name}")
             st.rerun()
 
     st.divider()
-    for i, row in df_c.iterrows():
-        precio_txt = formatear_precio(row['is_free'], row['price'], row['duration_num'], row['duration_unit'])
-        st.write(f"🏟️ **{row['name']}** | {precio_txt}")
-        if st.button("Eliminar", key=f"c_{i}"):
-            df_c = df_c.drop(i)
-            conn_c.update(data=df_c)
-            st.rerun()
+    if not df_c.empty:
+        for i, row in df_c.iterrows():
+            precio_txt = formatear_precio(row.get('is_free',0), row.get('price',0), row.get('duration_num',1), row.get('duration_unit','hora'))
+            st.write(f"🏟️ **{row['name']}** | {precio_txt}")
+            if st.button("Eliminar", key=f"c_{i}"):
+                df_c = df_c.drop(i)
+                save_sheet_data(URL_C, df_c)
+                st.rerun()
 
 # ================= 📅 发布比赛 =================
 elif menu == "📅 Publicar":
     st.title("📅 Programar Partido")
-    df_c = get_data(conn_c)
-    df_e = get_data(conn_e)
+    df_c = load_sheet_data(URL_C)
+    df_e = load_sheet_data(URL_E)
     
     if df_c.empty:
         st.warning("Añade un campo primero.")
@@ -126,59 +124,61 @@ elif menu == "📅 Publicar":
             if st.form_submit_button("Publicar"):
                 new_e = {"datetime": f"{date} {time}", "venue": venue, "players": ""}
                 df_e = pd.concat([df_e, pd.DataFrame([new_e])], ignore_index=True)
-                conn_e.update(data=df_e)
+                save_sheet_data(URL_E, df_e)
                 st.success("¡Partido publicado!")
 
 # ================= 🏠 首页报名 =================
 elif menu == "🏠 Inicio":
     st.title("⚽ Próximo Partido")
-    df_e = get_data(conn_e)
-    df_m = get_data(conn_m)
-    df_c = get_data(conn_c)
+    df_e = load_sheet_data(URL_E)
+    df_m = load_sheet_data(URL_M)
+    df_c = load_sheet_data(URL_C)
     
-    # 筛选未来的比赛[cite: 2]
-    now = datetime.now().strftime('%Y-%m-%d %H:%M')
-    future_events = df_e[df_e['datetime'] >= now].sort_values("datetime")
-    
-    if not future_events.empty:
-        event = future_events.iloc[0]
-        idx = future_events.index[0]
+    if not df_e.empty and 'datetime' in df_e.columns:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M')
+        future_events = df_e[df_e['datetime'] >= now].sort_values("datetime")
         
-        # 获取球场价格信息
-        v_info = df_c[df_c['name'] == event['venue']]
-        precio = "No especificado"
-        if not v_info.empty:
-            v = v_info.iloc[0]
-            precio = formatear_precio(v['is_free'], v['price'], v['duration_num'], v['duration_unit'])
-        
-        st.info(f"**⏰:** {event['datetime']}\n\n**🏟️:** {event['venue']}\n\n**💰:** {precio}")
-        
-        # 报名逻辑[cite: 2]
-        players = str(event['players']).split(",") if event['players'] and str(event['players']) != "nan" else []
-        players = [p.strip() for p in players if p.strip()]
-        
-        sel = st.selectbox("Tu nombre", ["-- Seleccionar --"] + sorted(df_m['name'].tolist()))
-        if st.button("Inscribirse / Cancelar", type="primary"):
-            if sel != "-- Seleccionar --":
-                if sel in players: players.remove(sel)
-                else: players.append(sel)
-                df_e.at[idx, 'players'] = ",".join(players)
-                conn_e.update(data=df_e)
-                st.rerun()
-        
-        st.subheader(f"🏃‍♂️ Inscritos: {len(players)}")
-        for p in players: st.write(f"✅ {p}")
+        if not future_events.empty:
+            event = future_events.iloc[0]
+            idx = future_events.index[0]
+            
+            v_info = df_c[df_c['name'] == event['venue']] if not df_c.empty else pd.DataFrame()
+            precio = "No especificado"
+            if not v_info.empty:
+                v = v_info.iloc[0]
+                precio = formatear_precio(v.get('is_free',0), v.get('price',0), v.get('duration_num',1), v.get('duration_unit','hora'))
+            
+            st.info(f"**⏰:** {event['datetime']}\n\n**🏟️:** {event['venue']}\n\n**💰:** {precio}")
+            
+            players = str(event['players']).split(",") if event['players'] and str(event['players']) != "nan" else []
+            players = [p.strip() for p in players if p.strip()]
+            
+            member_list = sorted(df_m['name'].tolist()) if not df_m.empty else []
+            sel = st.selectbox("Tu nombre", ["-- Seleccionar --"] + member_list)
+            
+            if st.button("Inscribirse / Cancelar", type="primary"):
+                if sel != "-- Seleccionar --":
+                    if sel in players: players.remove(sel)
+                    else: players.append(sel)
+                    df_e.at[idx, 'players'] = ",".join(players)
+                    save_sheet_data(URL_E, df_e)
+                    st.rerun()
+            
+            st.subheader(f"🏃‍♂️ Inscritos: {len(players)}")
+            for p in players: st.write(f"✅ {p}")
+        else:
+            st.write("No hay partidos programados.")
     else:
-        st.write("No hay partidos programados.")
+        st.write("Configura tus tablas en Google Sheets con los encabezados correctos.")
 
 # ================= ⏳ 历史记录 =================
 elif menu == "⏳ Historial":
     st.title("⏳ Historial")
-    df_e = get_data(conn_e)
-    now = datetime.now().strftime('%Y-%m-%d %H:%M')
-    past = df_e[df_e['datetime'] < now].sort_values("datetime", ascending=False)
-    
-    for i, row in past.iterrows():
-        with st.expander(f"📅 {row['datetime']} - {row['venue']}"):
-            p_list = str(row['players']).split(",") if row['players'] and str(row['players']) != "nan" else []
-            st.write(f"Participantes ({len(p_list)}): {', '.join(p_list)}")
+    df_e = load_sheet_data(URL_E)
+    if not df_e.empty and 'datetime' in df_e.columns:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M')
+        past = df_e[df_e['datetime'] < now].sort_values("datetime", ascending=False)
+        for i, row in past.iterrows():
+            with st.expander(f"📅 {row['datetime']} - {row['venue']}"):
+                p_list = str(row['players']).split(",") if row['players'] and str(row['players']) != "nan" else []
+                st.write(f"Participantes ({len(p_list)}): {', '.join(p_list)}")
