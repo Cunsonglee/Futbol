@@ -128,65 +128,84 @@ elif menu == "📅 Publicar":
                 save_sheet_data(URL_E, df_e)
                 st.success("¡Partido publicado!")
 
-# ================= 🏠 首页报名 =================
+# ================= 🏠 Página: Inicio (主页 - 报名与展示) =================
 elif menu == "🏠 Inicio":
     st.title("⚽ Próximo Partido")
+    
+    # 1. 实时读取所有数据
     df_e = load_sheet_data(URL_E)
     df_m = load_sheet_data(URL_M)
     df_c = load_sheet_data(URL_C)
     
+    # 2. 检查是否有比赛数据
     if not df_e.empty and 'datetime' in df_e.columns:
         now = datetime.now().strftime('%Y-%m-%d %H:%M')
+        # 筛选未来的比赛并按日期排序
         future_events = df_e[df_e['datetime'] >= now].sort_values("datetime")
         
         if not future_events.empty:
+            # 获取最近的一场比赛
             event = future_events.iloc[0]
-            idx = future_events.index[0]
+            idx = future_events.index[0] # 获取在原始 df_e 中的行索引
             
+            # 获取球场价格信息
             v_info = df_c[df_c['name'] == event['venue']] if not df_c.empty else pd.DataFrame()
             precio = "No especificado"
             if not v_info.empty:
                 v = v_info.iloc[0]
                 precio = formatear_precio(v.get('is_free',0), v.get('price',0), v.get('duration_num',1), v.get('duration_unit','hora'))
             
-            st.info(f"**⏰:** {event['datetime']}\n\n**🏟️:** {event['venue']}\n\n**💰:** {precio}")
+            # --- 界面展示 ---
+            st.info(f"**⏰ Fecha y Hora:** {event['datetime']}\n\n**🏟️ Campo:** {event['venue']}\n\n**💰 Precio:** {precio}")
             
-            players = str(event['players']).split(",") if event['players'] and str(event['players']) != "nan" else []
-            players = [p.strip() for p in players if p.strip()]
+            st.divider()
+            st.subheader("🙋‍♂️ Zona de Inscripción")
             
-            member_list = sorted(df_m['name'].tolist()) if not df_m.empty else []
-            sel = st.selectbox("Tu nombre", ["-- Seleccionar --"] + member_list)
+            # 3. 解析当前已报名名单 (鲁棒性处理)
+            raw_players = event.get('players', "")
+            if pd.isna(raw_players) or not str(raw_players).strip() or str(raw_players) == "nan":
+                current_players_list = []
+            else:
+                current_players_list = [p.strip() for p in str(raw_players).split(",") if p.strip()]
             
-# --- 找到首页报名按钮点击后的逻辑，修改为以下内容 ---
-if st.button("Inscribirse / Cancelar", type="primary"):
-    if sel != "-- Seleccionar --":
-        # 1. 获取当前球员列表，处理各种空值情况
-        raw_players = event.get('players', "")
-        
-        # 确保 raw_players 是字符串，如果是 NaN (float) 则转为空串
-        if pd.isna(raw_players):
-            raw_players = ""
+            # 4. 成员选择框
+            member_names = sorted(df_m['name'].tolist()) if not df_m.empty else []
+            sel = st.selectbox("Selecciona tu nombre para inscribirte:", ["-- Seleccionar --"] + member_names)
+            
+            # 5. 核心修改：报名按钮逻辑
+            if st.button("Inscribirse / Cancelar", type="primary"):
+                if sel == "-- Seleccionar --":
+                    st.warning("¡Por favor, selecciona tu nombre primero!")
+                else:
+                    # 增加或移除成员
+                    if sel in current_players_list:
+                        current_players_list.remove(sel)
+                        st.warning(f"Se ha cancelado la inscripción de {sel}.")
+                    else:
+                        current_players_list.append(sel)
+                        st.success(f"¡{sel} se ha inscrito con éxito!")
+                    
+                    # 核心修复：强制列类型并写入数据[cite: 2]
+                    df_e['players'] = df_e['players'].astype(object) 
+                    df_e.at[idx, 'players'] = ",".join(current_players_list)
+                    
+                    # 保存到 Google Sheets 并强制刷新[cite: 2]
+                    save_sheet_data(URL_E, df_e)
+                    st.rerun() 
+            
+            # 6. 实时展示已报名名单
+            st.divider()
+            st.subheader(f"🏃‍♂️ Total de inscritos: {len(current_players_list)} personas")
+            
+            if current_players_list:
+                for p in current_players_list:
+                    st.write(f"✅ {p}")
+            else:
+                st.write("Aún no hay inscritos. ¡Sé el primero!")
         else:
-            raw_players = str(raw_players)
-            
-        players = [p.strip() for p in raw_players.split(",") if p.strip()]
-        
-        # 2. 增加或移除成员
-        if sel in players:
-            players.remove(sel)
-        else:
-            players.append(sel)
-        
-        # 核心修复：强制将 players 列转换为对象/字符串类型，防止 TypeError
-        df_e['players'] = df_e['players'].astype(object) 
-        
-        # 3. 写入新数据
-        df_e.at[idx, 'players'] = ",".join(players)
-        
-        # 4. 保存并刷新[cite: 2]
-        save_sheet_data(URL_E, df_e)
-        st.success(f"Actualizado: {sel}")
-        st.rerun()
+            st.info("No hay partidos programados próximamente.")
+    else:
+        st.warning("No hay datos de partidos o la tabla está mal configurada.")
 
 # ================= ⏳ 历史记录 =================
 elif menu == "⏳ Historial":
