@@ -133,9 +133,10 @@ elif menu == "📅 Publicar":
                 except Exception as e:
                     st.error(f"Error: {e}")
 
-# ================= 🏠 主页 (带地图链接) =================
+# ================= 🏠 Página: Inicio (主页) =================
 elif menu == "🏠 Inicio":
     st.title("⚽ Próximo Partido")
+    
     df_e = load_sheet_data(URL_E)
     df_m = load_sheet_data(URL_M)
     df_c = load_sheet_data(URL_C)
@@ -143,13 +144,15 @@ elif menu == "🏠 Inicio":
     if not df_e.empty and 'datetime' in df_e.columns:
         tz = pytz.timezone('Europe/Madrid') 
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
+        
+        # 筛选未来比赛[cite: 1]
         future_events = df_e[df_e['datetime'].str[:16] >= now].sort_values("datetime")
         
         if not future_events.empty:
             event = future_events.iloc[0]
             idx = future_events.index[0]
             
-            # 获取球场详细信息和链接
+            # 获取球场信息[cite: 1]
             v_info = df_c[df_c['name'] == event['venue']] if not df_c.empty else pd.DataFrame()
             precio = "No especificado"
             map_link = "#"
@@ -158,30 +161,44 @@ elif menu == "🏠 Inicio":
                 precio = formatear_precio(v.get('is_free',0), v.get('price',0), v.get('duration_num',1), v.get('duration_unit','hora'))
                 map_link = v.get('map_url', '#')
             
-            # 使用 Markdown 显示可点击的球场名字
             st.info(f"**⏰ Fecha:** {event['datetime']}\n\n**🏟️ Campo:** [{event['venue']}]({map_link})\n\n**💰 Precio:** {precio}")
             st.divider()
             
+            # 解析已报名名单[cite: 1]
             raw_players = str(event.get('players', ""))
             current_players_list = [p.strip() for p in raw_players.split(",") if p.strip() and raw_players != "nan"]
             
-            member_names = sorted(df_m['name'].tolist()) if not df_m.empty else []
-            sel = st.selectbox("Tu nombre:", ["-- Seleccionar --"] + member_names)
+            # --- 核心改进：过滤下拉菜单[cite: 1] ---
+            all_members = sorted(df_m['name'].tolist()) if not df_m.empty else []
+            # 只有还没报名的人会出现在下拉菜单里[cite: 1]
+            available_members = [m for m in all_members if m not in current_players_list]
             
-            if st.button("Inscribirse / Cancelar", type="primary"):
+            st.subheader("🙋‍♂️ Zona de Inscripción")
+            sel = st.selectbox("Selecciona tu nombre:", ["-- Seleccionar --"] + available_members)
+            
+            if st.button("Confirmar Inscripción", type="primary"):
                 if sel != "-- Seleccionar --":
-                    if sel in current_players_list:
-                        current_players_list.remove(sel)
-                    else:
-                        current_players_list.append(sel)
+                    current_players_list.append(sel) # 只能添加，因为已报名的人不在这里了[cite: 1]
                     df_e['players'] = df_e['players'].astype(object) 
                     df_e.at[idx, 'players'] = ",".join(current_players_list)
                     save_sheet_data(URL_E, df_e)
+                    st.success(f"¡{sel} añadido!")
                     st.rerun() 
             
+            # --- 增加：取消报名按钮 (可选，因为名字从下拉菜单消失了) ---
+            st.divider()
             st.subheader(f"🏃‍♂️ Inscritos: {len(current_players_list)}")
+            
             for p in current_players_list:
-                st.write(f"✅ {p}")
+                c1, c2 = st.columns([4, 1])
+                c1.write(f"✅ {p}")
+                # 在名单旁边放一个“取消”按钮，方便退出[cite: 1]
+                if c2.button("❌", key=f"del_{p}"):
+                    current_players_list.remove(p)
+                    df_e['players'] = df_e['players'].astype(object) 
+                    df_e.at[idx, 'players'] = ",".join(current_players_list)
+                    save_sheet_data(URL_E, df_e)
+                    st.rerun()
         else:
             st.info("No hay partidos programados.")
     else:
