@@ -10,20 +10,16 @@ import pytz
 # ================= 1. 基础配置 =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
 
-# 建立连接
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- 使用你提供的正确 URL ---
 URL_M = "https://docs.google.com/spreadsheets/d/1tjTojyme8N-CaEdcewJHBwTPyDqbtF6JvWsz-Ej3HPU/edit"
 URL_C = "https://docs.google.com/spreadsheets/d/1UWb__avGXO5wxIJLrqRh14zhDwMbqFTX38O-zBsDaPs/edit"
 URL_E = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
 
 def load_sheet_data(url):
-    """实时读取数据，清除空行"""
     return conn.read(spreadsheet=url, ttl=0).dropna(how="all")
 
 def save_sheet_data(url, df):
-    """保存数据到 Google Sheets"""
     conn.update(spreadsheet=url, data=df)
 
 # ================= 2. 辅助函数 =================
@@ -102,7 +98,8 @@ elif menu == "🥅 Campos":
     if not df_c.empty:
         for i, row in df_c.iterrows():
             precio_txt = formatear_precio(row.get('is_free',0), row.get('price',0), row.get('duration_num',1), row.get('duration_unit','hora'))
-            st.write(f"🏟️ **{row['name']}** | {precio_txt}")
+            # 球场管理页面显示可点击链接
+            st.markdown(f"🏟️ **[{row['name']}]({row['map_url']})** | {precio_txt}")
             if st.button("Eliminar", key=f"c_{i}"):
                 df_c = df_c.drop(i)
                 save_sheet_data(URL_C, df_c)
@@ -136,14 +133,13 @@ elif menu == "📅 Publicar":
                 except Exception as e:
                     st.error(f"Error: {e}")
 
-# ================= 🏠 主页 =================
+# ================= 🏠 主页 (带地图链接) =================
 elif menu == "🏠 Inicio":
     st.title("⚽ Próximo Partido")
     df_e = load_sheet_data(URL_E)
     df_m = load_sheet_data(URL_M)
     df_c = load_sheet_data(URL_C)
     
-    # --- 修复缩进开始 ---
     if not df_e.empty and 'datetime' in df_e.columns:
         tz = pytz.timezone('Europe/Madrid') 
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
@@ -152,20 +148,22 @@ elif menu == "🏠 Inicio":
         if not future_events.empty:
             event = future_events.iloc[0]
             idx = future_events.index[0]
+            
+            # 获取球场详细信息和链接
             v_info = df_c[df_c['name'] == event['venue']] if not df_c.empty else pd.DataFrame()
             precio = "No especificado"
+            map_link = "#"
             if not v_info.empty:
                 v = v_info.iloc[0]
                 precio = formatear_precio(v.get('is_free',0), v.get('price',0), v.get('duration_num',1), v.get('duration_unit','hora'))
+                map_link = v.get('map_url', '#')
             
-            st.info(f"**⏰:** {event['datetime']}\n\n**🏟️:** {event['venue']}\n\n**💰:** {precio}")
+            # 使用 Markdown 显示可点击的球场名字
+            st.info(f"**⏰ Fecha:** {event['datetime']}\n\n**🏟️ Campo:** [{event['venue']}]({map_link})\n\n**💰 Precio:** {precio}")
             st.divider()
             
             raw_players = str(event.get('players', ""))
-            if raw_players == "nan" or not raw_players.strip():
-                current_players_list = []
-            else:
-                current_players_list = [p.strip() for p in raw_players.split(",") if p.strip()]
+            current_players_list = [p.strip() for p in raw_players.split(",") if p.strip() and raw_players != "nan"]
             
             member_names = sorted(df_m['name'].tolist()) if not df_m.empty else []
             sel = st.selectbox("Tu nombre:", ["-- Seleccionar --"] + member_names)
@@ -188,14 +186,13 @@ elif menu == "🏠 Inicio":
             st.info("No hay partidos programados.")
     else:
         st.write("Configura tus datos para empezar.")
-    # --- 修复缩进结束 ---
 
-# ================= ⏳ 历史记录 =================
+# ================= ⏳ 历史记录 (带地图链接) =================
 elif menu == "⏳ Historial":
     st.title("⏳ Historial de Partidos")
     df_e = load_sheet_data(URL_E)
+    df_c = load_sheet_data(URL_C) # 这里的 df_c 用来匹配历史记录里的地图链接
     
-    # --- 修复缩进开始 ---
     if not df_e.empty and 'datetime' in df_e.columns:
         tz = pytz.timezone('Europe/Madrid')
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
@@ -203,8 +200,14 @@ elif menu == "⏳ Historial":
         
         if not past_events.empty:
             for i, row in past_events.iterrows():
+                # 寻找该球场的地图链接
+                v_match = df_c[df_c['name'] == row['venue']]
+                v_url = v_match.iloc[0]['map_url'] if not v_match.empty else "#"
+                
+                # 标题显示为可点击链接[cite: 1]
                 event_label = f"📅 {row['datetime']} | 🏟️ {row['venue']}"
                 with st.expander(event_label):
+                    st.markdown(f"📍 [Ver en Google Maps]({v_url})") # 内部也加一个明确的链接[cite: 1]
                     raw_p = str(row.get('players', ""))
                     players_list = [p.strip() for p in raw_p.split(",") if p.strip() and raw_p != "nan"]
                     st.write(f"Participantes ({len(players_list)}): " + ", ".join(players_list))
@@ -212,4 +215,3 @@ elif menu == "⏳ Historial":
             st.info("No hay historial.")
     else:
         st.info("No hay datos.")
-    # --- 修复缩进结束 ---
