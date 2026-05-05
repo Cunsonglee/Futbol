@@ -169,7 +169,7 @@ elif menu == "🏠 Inicio":
         
         # 3. 核心修改：筛选“大于或等于现在”的比赛
         # 这会自动过滤掉所有已经过去的比赛
-        future_events = df_e[df_e['datetime'] >= now].sort_values("datetime")
+        future_events = df_e[df_e['datetime'].str[:16] >= now].sort_values("datetime")
         
         if not future_events.empty:
             # 获取最近的一场未来比赛
@@ -236,7 +236,7 @@ elif menu == "⏳ Historial":
         now = datetime.now().strftime('%Y-%m-%d %H:%M')
         
         # 3. 筛选已经过去的比赛（时间小于现在），并按时间倒序排列（最近的排最前）
-        past_events = df_e[df_e['datetime'] < now].sort_values("datetime", ascending=False)
+        past_events = df_e[df_e['datetime'].str[:16] < now].sort_values("datetime", ascending=False)
         
         if not past_events.empty:
             st.write("Aquí puedes ver los partidos pasados y quiénes participaron:")
