@@ -5,9 +5,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
-import pytz # 确保 requirements.txt 里有 pytz
-
-
+import pytz 
 
 # ================= 1. 基础配置 =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
@@ -25,12 +23,11 @@ def load_sheet_data(url):
     return conn.read(spreadsheet=url, ttl=0).dropna(how="all")
 
 def save_sheet_data(url, df):
-    """保存数据到 Google Sheets[cite: 2]"""
+    """保存数据到 Google Sheets"""
     conn.update(spreadsheet=url, data=df)
 
-# ================= 2. 辅助函数 (爬虫与格式化) =================
+# ================= 2. 辅助函数 =================
 def fetch_venue_name(url):
-    """自动抓取球场名[cite: 2]"""
     try:
         if "/place/" in url:
             part = url.split("/place/")[1].split("/")[0]
@@ -46,7 +43,6 @@ def fetch_venue_name(url):
     except: return None
 
 def formatear_precio(is_free, price, num, unit):
-    """价格显示逻辑[cite: 2]"""
     if is_free or is_free == 1: return "Gratis"
     try:
         unit_str = "días" if (num > 1 and unit == "día") else (unit + "s" if num > 1 else unit)
@@ -112,100 +108,67 @@ elif menu == "🥅 Campos":
                 save_sheet_data(URL_C, df_c)
                 st.rerun()
 
-# ================= 📅 Página: Publicar Partido (发布比赛) =================
+# ================= 📅 发布比赛 =================
 elif menu == "📅 Publicar":
     st.title("📅 Programar Partido")
-    
-    # 读取球场数据和比赛数据
     df_c = load_sheet_data(URL_C)
     df_e = load_sheet_data(URL_E)
     
     if df_c.empty:
-        st.warning("⚠️ Todavía no hay campos guardados. ¡Ve a '🥅 Campos' para añadir uno!")
+        st.warning("⚠️ Todavía no hay campos guardados.")
     else:
-        # 修复点：删除了标注文字
         venue_list = df_c['name'].tolist()
-        
         with st.form("pub_form"):
             col1, col2 = st.columns(2)
             with col1:
-                event_date = st.date_input("Fecha del partido")
+                event_date = st.date_input("Fecha")
             with col2:
-                event_time = st.time_input("Hora del partido")
-                
-            selected_venue = st.selectbox("Seleccionar campo", venue_list)
-            submit_event = st.form_submit_button("Publicar Partido")
-            
-            if submit_event:
-                # 格式化时间，包含日期和具体分钟
+                event_time = st.time_input("Hora")
+            selected_venue = st.selectbox("Campo", venue_list)
+            if st.form_submit_button("Publicar"):
                 datetime_str = f"{event_date.strftime('%Y-%m-%d')} {event_time.strftime('%H:%M')}"
-                
-                # 创建新条目
-                new_e = {
-                    "datetime": datetime_str, 
-                    "venue": selected_venue, 
-                    "players": ""
-                }
-                
-                # 合并并保存
+                new_e = {"datetime": datetime_str, "venue": selected_venue, "players": ""}
                 df_e = pd.concat([df_e, pd.DataFrame([new_e])], ignore_index=True)
-                
                 try:
                     save_sheet_data(URL_E, df_e)
-                    st.success(f"✅ ¡Partido publicado con éxito para el {datetime_str}!")
+                    st.success("¡Publicado!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error al guardar en Google Sheets: {e}")
+                    st.error(f"Error: {e}")
 
-# ================= 🏠 Página: Inicio (主页 - 仅显示未来比赛) =================
+# ================= 🏠 主页 =================
 elif menu == "🏠 Inicio":
     st.title("⚽ Próximo Partido")
-    
-    # 1. 实时读取数据
     df_e = load_sheet_data(URL_E)
     df_m = load_sheet_data(URL_M)
     df_c = load_sheet_data(URL_C)
     
-if not df_e.empty and 'datetime' in df_e.columns:
-        # --- 核心修改开始 ---
-        # 1. 设置为你当地的时区（例如西班牙）
+    # --- 修复缩进开始 ---
+    if not df_e.empty and 'datetime' in df_e.columns:
         tz = pytz.timezone('Europe/Madrid') 
-        # 2. 获取当前的精确时间，格式为 YYYY-MM-DD HH:MM
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
-        
-        # 3. 强制表格的时间字符串也只取前16位（即 YYYY-MM-DD HH:MM），防止秒数干扰
-        # 同时确保使用字符串对比
         future_events = df_e[df_e['datetime'].str[:16] >= now].sort_values("datetime")
-        # --- 核心修改结束 ---
         
         if not future_events.empty:
-            # 获取最近的一场未来比赛
             event = future_events.iloc[0]
             idx = future_events.index[0]
-            
-            # 获取球场价格信息
             v_info = df_c[df_c['name'] == event['venue']] if not df_c.empty else pd.DataFrame()
             precio = "No especificado"
             if not v_info.empty:
                 v = v_info.iloc[0]
                 precio = formatear_precio(v.get('is_free',0), v.get('price',0), v.get('duration_num',1), v.get('duration_unit','hora'))
             
-            # --- 界面展示 ---
-            st.info(f"**⏰ Fecha y Hora:** {event['datetime']}\n\n**🏟️ Campo:** {event['venue']}\n\n**💰 Precio:** {precio}")
-            
+            st.info(f"**⏰:** {event['datetime']}\n\n**🏟️:** {event['venue']}\n\n**💰:** {precio}")
             st.divider()
-            st.subheader("🙋‍♂️ Zona de Inscripción")
             
-            # 4. 解析名单 (处理空值)[cite: 2]
             raw_players = str(event.get('players', ""))
             if raw_players == "nan" or not raw_players.strip():
                 current_players_list = []
             else:
                 current_players_list = [p.strip() for p in raw_players.split(",") if p.strip()]
             
-            # 5. 报名操作[cite: 2]
             member_names = sorted(df_m['name'].tolist()) if not df_m.empty else []
-            sel = st.selectbox("Selecciona tu nombre:", ["-- Seleccionar --"] + member_names)
+            sel = st.selectbox("Tu nombre:", ["-- Seleccionar --"] + member_names)
             
             if st.button("Inscribirse / Cancelar", type="primary"):
                 if sel != "-- Seleccionar --":
@@ -213,63 +176,40 @@ if not df_e.empty and 'datetime' in df_e.columns:
                         current_players_list.remove(sel)
                     else:
                         current_players_list.append(sel)
-                    
-                    # 写入数据[cite: 2]
                     df_e['players'] = df_e['players'].astype(object) 
                     df_e.at[idx, 'players'] = ",".join(current_players_list)
                     save_sheet_data(URL_E, df_e)
                     st.rerun() 
             
-            # 6. 名单实时显示
-            st.divider()
             st.subheader(f"🏃‍♂️ Inscritos: {len(current_players_list)}")
             for p in current_players_list:
                 st.write(f"✅ {p}")
         else:
-            # 如果所有比赛都过期了[cite: 2]
-            st.info("No hay partidos programados. Los partidos pasados se han movido a 'Historial'.")
+            st.info("No hay partidos programados.")
     else:
         st.write("Configura tus datos para empezar.")
+    # --- 修复缩进结束 ---
 
-# ================= ⏳ Página: Historial (历史记录 - 显示日期和时间) =================
+# ================= ⏳ 历史记录 =================
 elif menu == "⏳ Historial":
     st.title("⏳ Historial de Partidos")
-    
-    # 1. 实时读取比赛数据
     df_e = load_sheet_data(URL_E)
     
-if not df_e.empty and 'datetime' in df_e.columns:
-        # --- 核心修改开始 ---
+    # --- 修复缩进开始 ---
+    if not df_e.empty and 'datetime' in df_e.columns:
         tz = pytz.timezone('Europe/Madrid')
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
-        
-        # 3. 筛选已经过去的比赛（时间小于现在），并按时间倒序排列（最近的排最前）
         past_events = df_e[df_e['datetime'].str[:16] < now].sort_values("datetime", ascending=False)
         
         if not past_events.empty:
-            st.write("Aquí puedes ver los partidos pasados y quiénes participaron:")
-            
             for i, row in past_events.iterrows():
-                # 直接显示 row['datetime']，它包含了日期和时间[cite: 2]
                 event_label = f"📅 {row['datetime']} | 🏟️ {row['venue']}"
-                
                 with st.expander(event_label):
-                    # 4. 解析报名名单字符串[cite: 2]
                     raw_p = str(row.get('players', ""))
-                    if raw_p == "nan" or not raw_p.strip():
-                        players_list = []
-                    else:
-                        players_list = [p.strip() for p in raw_p.split(",") if p.strip()]
-                    
-                    # 5. 显示参与详情[cite: 2]
-                    st.markdown(f"**Total de participantes:** {len(players_list)}")
-                    
-                    if players_list:
-                        # 用逗号连接名字并显示
-                        st.write("🏃 Jugadores: " + ", ".join(players_list))
-                    else:
-                        st.write("Nadie se inscribió en este partido.")
+                    players_list = [p.strip() for p in raw_p.split(",") if p.strip() and raw_p != "nan"]
+                    st.write(f"Participantes ({len(players_list)}): " + ", ".join(players_list))
         else:
-            st.info("Aún no hay partidos en el historial.")
+            st.info("No hay historial.")
     else:
-        st.info("No hay datos de partidos grabados.")
+        st.info("No hay datos.")
+    # --- 修复缩进结束 ---
