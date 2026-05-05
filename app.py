@@ -154,25 +154,27 @@ elif menu == "📅 Publicar":
                 except Exception as e:
                     st.error(f"❌ Error al guardar en Google Sheets: {e}")
 
-# ================= 🏠 Página: Inicio (主页 - 报名与展示) =================
+# ================= 🏠 Página: Inicio (主页 - 仅显示未来比赛) =================
 elif menu == "🏠 Inicio":
     st.title("⚽ Próximo Partido")
     
-    # 1. 实时读取所有数据
+    # 1. 实时读取数据
     df_e = load_sheet_data(URL_E)
     df_m = load_sheet_data(URL_M)
     df_c = load_sheet_data(URL_C)
     
-    # 2. 检查是否有比赛数据
     if not df_e.empty and 'datetime' in df_e.columns:
+        # 2. 获取当前系统精确时间 (格式需与表格一致)
         now = datetime.now().strftime('%Y-%m-%d %H:%M')
-        # 筛选未来的比赛并按日期排序
+        
+        # 3. 核心修改：筛选“大于或等于现在”的比赛
+        # 这会自动过滤掉所有已经过去的比赛
         future_events = df_e[df_e['datetime'] >= now].sort_values("datetime")
         
         if not future_events.empty:
-            # 获取最近的一场比赛
+            # 获取最近的一场未来比赛
             event = future_events.iloc[0]
-            idx = future_events.index[0] # 获取在原始 df_e 中的行索引
+            idx = future_events.index[0]
             
             # 获取球场价格信息
             v_info = df_c[df_c['name'] == event['venue']] if not df_c.empty else pd.DataFrame()
@@ -187,51 +189,40 @@ elif menu == "🏠 Inicio":
             st.divider()
             st.subheader("🙋‍♂️ Zona de Inscripción")
             
-            # 3. 解析当前已报名名单 (鲁棒性处理)
-            raw_players = event.get('players', "")
-            if pd.isna(raw_players) or not str(raw_players).strip() or str(raw_players) == "nan":
+            # 4. 解析名单 (处理空值)[cite: 2]
+            raw_players = str(event.get('players', ""))
+            if raw_players == "nan" or not raw_players.strip():
                 current_players_list = []
             else:
-                current_players_list = [p.strip() for p in str(raw_players).split(",") if p.strip()]
+                current_players_list = [p.strip() for p in raw_players.split(",") if p.strip()]
             
-            # 4. 成员选择框
+            # 5. 报名操作[cite: 2]
             member_names = sorted(df_m['name'].tolist()) if not df_m.empty else []
-            sel = st.selectbox("Selecciona tu nombre para inscribirte:", ["-- Seleccionar --"] + member_names)
+            sel = st.selectbox("Selecciona tu nombre:", ["-- Seleccionar --"] + member_names)
             
-            # 5. 核心修改：报名按钮逻辑
             if st.button("Inscribirse / Cancelar", type="primary"):
-                if sel == "-- Seleccionar --":
-                    st.warning("¡Por favor, selecciona tu nombre primero!")
-                else:
-                    # 增加或移除成员
+                if sel != "-- Seleccionar --":
                     if sel in current_players_list:
                         current_players_list.remove(sel)
-                        st.warning(f"Se ha cancelado la inscripción de {sel}.")
                     else:
                         current_players_list.append(sel)
-                        st.success(f"¡{sel} se ha inscrito con éxito!")
                     
-                    # 核心修复：强制列类型并写入数据[cite: 2]
+                    # 写入数据[cite: 2]
                     df_e['players'] = df_e['players'].astype(object) 
                     df_e.at[idx, 'players'] = ",".join(current_players_list)
-                    
-                    # 保存到 Google Sheets 并强制刷新[cite: 2]
                     save_sheet_data(URL_E, df_e)
                     st.rerun() 
             
-            # 6. 实时展示已报名名单
+            # 6. 名单实时显示
             st.divider()
-            st.subheader(f"🏃‍♂️ Total de inscritos: {len(current_players_list)} personas")
-            
-            if current_players_list:
-                for p in current_players_list:
-                    st.write(f"✅ {p}")
-            else:
-                st.write("Aún no hay inscritos. ¡Sé el primero!")
+            st.subheader(f"🏃‍♂️ Inscritos: {len(current_players_list)}")
+            for p in current_players_list:
+                st.write(f"✅ {p}")
         else:
-            st.info("No hay partidos programados próximamente.")
+            # 如果所有比赛都过期了[cite: 2]
+            st.info("No hay partidos programados. Los partidos pasados se han movido a 'Historial'.")
     else:
-        st.warning("No hay datos de partidos o la tabla está mal configurada.")
+        st.write("Configura tus datos para empezar.")
 
 # ================= ⏳ Página: Historial (历史记录 - 显示日期和时间) =================
 elif menu == "⏳ Historial":
