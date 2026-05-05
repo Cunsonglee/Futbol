@@ -9,10 +9,21 @@ import urllib.parse
 # ================= 1. 基础配置 =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
 
-# 建立三个 Google Sheets 连接
-conn_m = st.connection("miembros", type=GSheetsConnection)
-conn_c = st.connection("campos", type=GSheetsConnection)
-conn_e = st.connection("eventos", type=GSheetsConnection)
+# 修改连接定义方式
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# 定义三个表格的 URL (替换为你自己的 edit 链接)
+URL_M = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
+URL_C = "https://docs.google.com/spreadsheets/d/1tjTojyme8N-CaEdcewJHBwTPyDqbtF6JvWsz-Ej3HPU/edit"
+URL_E = "https://docs.google.com/spreadsheets/d/1UWb__avGXO5wxIJLrqRh14zhDwMbqFTX38O-zBsDaPs/edit"
+
+# 修改读取数据的函数
+def get_data(url):
+    return conn.read(spreadsheet=url, ttl=0).dropna(how="all")
+
+# 修改保存数据的函数
+def save_data(url, df):
+    conn.update(spreadsheet=url, data=df)
 
 # ================= 2. 辅助函数 (保留原逻辑) =================
 def fetch_venue_name(url):
