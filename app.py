@@ -10,13 +10,15 @@ import pytz
 # ================= 1. CONFIGURACIÓN =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
 
-# --- IMPORTANTE: Tu URL de Google Sheets ---
+# --- IMPORTANTE: Reemplaza con tu URL real ---
 MAIN_URL = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
+
+# Usamos la forma que te funcionó
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data(worksheet):
     try:
-        # ttl=0 para asegurar que los votos y registros sean instantáneos
+        # ttl=0 para asegurar datos en tiempo real en votos y registros
         return conn.read(spreadsheet=MAIN_URL, worksheet=worksheet, ttl=0).dropna(how="all")
     except:
         return pd.DataFrame()
@@ -28,7 +30,6 @@ def save_data(worksheet, df):
     except Exception as e:
         st.error(f"Error al guardar: {e}")
 
-# --- Obtener los próximos 4 sábados automáticamente ---
 def get_next_saturdays(n=4):
     saturdays = []
     d = datetime.now()
@@ -39,13 +40,13 @@ def get_next_saturdays(n=4):
     return saturdays
 
 # ================= 2. INTERFAZ =================
-st.title("⚽ Gestión de Fútbol")
+st.title("⚽ Gestión del Club")
 
 tab_inicio, tab_votar, tab_publicar, tab_campos, tab_miembros, tab_historial = st.tabs([
     "🏠 Inicio", "🗳️ Votar", "📅 Publicar", "🥅 Campos", "🤼‍♂️ Miembros", "⏳ Historial"
 ])
 
-# --- TAB 1: INICIO (Partidos Confirmados) ---
+# --- TAB 1: INICIO ---
 with tab_inicio:
     st.subheader("Partidos Programados")
     df_e = load_data("Eventos")
@@ -55,6 +56,7 @@ with tab_inicio:
     if not df_e.empty:
         tz = pytz.timezone('Europe/Madrid')
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
+        # Filtramos partidos que no han pasado
         activos = df_e[df_e['datetime'] >= now].sort_values("datetime")
         
         if not activos.empty:
@@ -68,74 +70,62 @@ with tab_inicio:
                     players = [p.strip() for p in str(event['players']).split(",") if p.strip() and str(event['players']) != "nan"]
                     st.write(f"🏃 **Inscritos ({len(players)}):** {', '.join(players)}")
                     
-                    # Inscripción
                     non_signed = [m for m in df_m['name'].tolist() if m not in players] if not df_m.empty else []
-                    c_sel, c_btn = st.columns([3, 1])
-                    p_name = c_sel.selectbox("Tu nombre:", ["-- Seleccionar --"] + non_signed, key=f"ins_{idx}")
-                    if c_btn.button("Inscribirme", key=f"btn_{idx}"):
-                        if p_name != "-- Seleccionar --":
-                            players.append(p_name)
-                            df_e.at[idx, 'players'] = ",".join(players)
-                            save_data("Eventos", df_e)
-                            st.rerun()
+                    
+                    # Formulario de inscripción para evitar refrescos molestos
+                    with st.container():
+                        c_sel, c_btn = st.columns([3, 1])
+                        p_name = c_sel.selectbox("Tu nombre:", ["-- Seleccionar --"] + non_signed, key=f"ins_{idx}")
+                        if c_btn.button("Inscribirme", key=f"btn_{idx}"):
+                            if p_name != "-- Seleccionar --":
+                                players.append(p_name)
+                                df_e.at[idx, 'players'] = ",".join(players)
+                                save_data("Eventos", df_e)
+                                st.rerun()
         else:
-            st.info("No hay partidos programados. ¡Vota para organizar uno!")
+            st.info("No hay partidos confirmados. ¡Ve a la pestaña de Votar!")
 
-# --- TAB 2: VOTAR (Elegir Sábado y Turno) ---
+# --- TAB 2: VOTAR ---
 with tab_votar:
-    st.subheader("Votación para el Sábado")
+    st.subheader("Votación para el próximo Sábado")
     df_v = load_data("Votos")
     df_m = load_data("Miembros")
     
-    # 获取接下来的周六
     sabs = get_next_saturdays()
     
-    # 使用表单包裹投票控件，这样可以一次性提交，减少页面刷新次数
-    with st.form("form_votacion"):
-        v_fecha = st.selectbox("Selecciona el día (Sábado):", sabs)
-        v_turno = st.radio("Selecciona el turno:", ["Mañana", "Tarde"])
+    with st.form("form_votos", clear_on_submit=False):
+        v_fecha = st.selectbox("Día del Sábado:", sabs)
+        v_turno = st.radio("Turno:", ["Mañana", "Tarde"])
+        lista_m = ["-- Seleccionar --"] + (df_m['name'].tolist() if not df_m.empty else [])
+        v_user = st.selectbox("¿Quién eres?", lista_m)
         
-        # 这里的 key 必须唯一
-        lista_miembros = ["-- Seleccionar --"] + (df_m['name'].tolist() if not df_m.empty else [])
-        v_user = st.selectbox("¿Quién eres?", lista_miembros)
-        
-        submit_voto = st.form_submit_button("Enviar Voto")
-        
-        if submit_voto:
+        if st.form_submit_button("Enviar Voto"):
             if v_user != "-- Seleccionar --":
-                # 检查是否已经投过票了
                 exists = df_v[(df_v['fecha'] == v_fecha) & (df_v['turno'] == v_turno) & (df_v['usuario'] == v_user)]
-                
                 if exists.empty:
                     new_v = pd.DataFrame([{"fecha": v_fecha, "turno": v_turno, "usuario": v_user}])
                     df_v = pd.concat([df_v, new_v], ignore_index=True)
                     save_data("Votos", df_v)
-                    st.success(f"¡Gracias {v_user}! Tu voto ha sido registrado para el {v_fecha} por la {v_turno}.")
-                    # 注意：如果这里用了 st.rerun()，上面的成功提示会闪现消失。
-                    # 建议不在这里写 rerun，或者让用户手动刷新查看结果。
+                    st.success(f"¡Voto registrado para {v_user}!")
+                    # No hacemos rerun aquí para que el usuario vea el mensaje de éxito
                 else:
-                    st.warning(f"Atención: {v_user}, ya has votado por este turno anteriormente.")
+                    st.warning("Ya has votado por este turno.")
             else:
-                st.error("Por favor, selecciona tu nombre antes de votar.")
+                st.error("Por favor, selecciona tu nombre.")
 
     st.divider()
-    st.write("📊 **Estado actual de las votaciones:**")
-    
-    # 重新加载数据以显示最新结果
-    df_v_display = load_data("Votos")
-    if not df_v_display.empty:
-        # 统计每个日期时段的票数
-        res = df_v_display.groupby(['fecha', 'turno']).size().reset_index(name='count')
+    st.write("📊 **Progreso de votaciones:**")
+    df_v_view = load_data("Votos") # Recargar para ver progreso
+    if not df_v_view.empty:
+        res = df_v_view.groupby(['fecha', 'turno']).size().reset_index(name='count')
         for _, r in res.iterrows():
-            # 这里的颜色根据人数变化
             color = "green" if r['count'] >= 10 else "orange"
-            st.write(f"📅 **{r['fecha']} ({r['turno']})**")
-            st.markdown(f"Progreso: :{color}[{r['count']} / 10 votos]")
+            st.write(f"📅 {r['fecha']} ({r['turno']}): **{r['count']}/10 votos**")
             st.progress(min(r['count'] / 10, 1.0))
 
-# --- TAB 3: PUBLICAR (Solo si hay >= 10 votos) ---
+# --- TAB 3: PUBLICAR ---
 with tab_publicar:
-    st.subheader("Confirmar y Publicar Partido")
+    st.subheader("Publicar Partido (Solo >= 10 votos)")
     df_v = load_data("Votos")
     df_c = load_data("Campos")
     
@@ -144,85 +134,73 @@ with tab_publicar:
         ready = summary[summary['count'] >= 10]
         
         if ready.empty:
-            st.warning("Aún ningún turno ha llegado a 10 personas.")
+            st.warning("Aún no hay turnos con 10 personas.")
         else:
             with st.form("form_pub"):
-                options = [f"{r['fecha']} ({r['turno']})" for _, r in ready.iterrows()]
-                selected_voto = st.selectbox("Turnos listos:", options)
-                
-                final_time = st.time_input("Hora de encuentro:")
-                final_venue = st.selectbox("Seleccionar Campo:", df_c['name'].tolist() if not df_c.empty else [])
+                labels = [f"{r['fecha']} ({r['turno']})" for _, r in ready.iterrows()]
+                selected_v = st.selectbox("Turnos listos:", labels)
+                f_time = st.time_input("Hora de encuentro:")
+                f_venue = st.selectbox("Seleccionar Campo:", df_c['name'].tolist() if not df_c.empty else [])
                 
                 if st.form_submit_button("🚀 Publicar Partido"):
-                    f_date = selected_voto.split(" (")[0]
-                    dt_str = f"{f_date} {final_time.strftime('%H:%M')}"
-                    
+                    f_date = selected_v.split(" (")[0]
+                    dt_str = f"{f_date} {f_time.strftime('%H:%M')}"
                     df_e = load_data("Eventos")
-                    new_match = pd.DataFrame([{"datetime": dt_str, "venue": final_venue, "players": ""}])
+                    new_match = pd.DataFrame([{"datetime": dt_str, "venue": f_venue, "players": ""}])
                     df_e = pd.concat([df_e, new_match], ignore_index=True)
                     save_data("Eventos", df_e)
-                    st.success("¡Partido publicado!")
+                    st.success("¡Partido publicado en Inicio!")
                     st.rerun()
 
 # --- TAB 4: CAMPOS ---
 with tab_campos:
     st.subheader("Gestión de Campos")
     df_c = load_data("Campos")
-    with st.form("add_c"):
-        c_url = st.text_input("Link Google Maps:")
-        if st.form_submit_button("Añadir Campo"):
+    with st.form("add_campo"):
+        u = st.text_input("URL Google Maps:")
+        if st.form_submit_button("Guardar Campo"):
             try:
-                h = {'User-Agent': 'Mozilla/5.0'}
-                res = requests.get(c_url, headers=h, timeout=5)
+                res = requests.get(u, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
                 name = BeautifulSoup(res.text, 'html.parser').title.string.replace(" - Google Maps", "").strip()
-                new_c = pd.DataFrame([{"name": name, "map_url": c_url}])
-                df_c = pd.concat([df_c, new_c], ignore_index=True)
+                df_c = pd.concat([df_c, pd.DataFrame([{"name": name, "map_url": u}])], ignore_index=True)
                 save_data("Campos", df_c)
                 st.rerun()
-            except: st.error("Error al obtener nombre.")
-    
+            except: st.error("Error al obtener el nombre.")
     for i, r in df_c.iterrows():
         c1, c2 = st.columns([4,1])
         c1.markdown(f"🏟️ [{r['name']}]({r['map_url']})")
-        if c2.button("🗑️", key=f"dc_{i}"):
+        if c2.button("Eliminar", key=f"dc_{i}"):
             df_c = df_c.drop(i)
             save_data("Campos", df_c)
             st.rerun()
 
 # --- TAB 5: MIEMBROS ---
 with tab_miembros:
-    st.subheader("Miembros")
+    st.subheader("Gestión de Miembros")
     df_m = load_data("Miembros")
     with st.form("add_m"):
-        m_name = st.text_input("Nombre:")
+        n = st.text_input("Nombre:")
         if st.form_submit_button("Añadir"):
-            df_m = pd.concat([df_m, pd.DataFrame([{"name": m_name}])], ignore_index=True)
+            df_m = pd.concat([df_m, pd.DataFrame([{"name": n}])], ignore_index=True)
             save_data("Miembros", df_m)
             st.rerun()
     for i, r in df_m.iterrows():
         c1, c2 = st.columns([4,1])
         c1.write(f"👤 {r['name']}")
-        if c2.button("🗑️", key=f"dm_{i}"):
+        if c2.button("Eliminar", key=f"dm_{i}"):
             df_m = df_m.drop(i)
             save_data("Miembros", df_m)
             st.rerun()
 
-# --- TAB 6: HISTORIAL (Partidos pasados) ---
+# --- TAB 6: HISTORIAL ---
 with tab_historial:
-    st.subheader("Historial de Partidos")
+    st.subheader("Partidos Pasados")
     df_e = load_data("Eventos")
-    
     if not df_e.empty:
         tz = pytz.timezone('Europe/Madrid')
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
-        # Partidos con fecha menor a la actual
         pasados = df_e[df_e['datetime'] < now].sort_values("datetime", ascending=False)
-        
-        if not pasados.empty:
-            for i, row in pasados.iterrows():
-                with st.expander(f"📅 {row['datetime']} - {row['venue']}"):
-                    p_list = [p.strip() for p in str(row['players']).split(",") if p.strip() and str(row['players']) != "nan"]
-                    st.write(f"**Participantes ({len(p_list)}):**")
-                    st.write(", ".join(p_list))
-        else:
-            st.info("No hay partidos en el historial todavía.")
+        for i, row in pasados.iterrows():
+            with st.expander(f"📅 {row['datetime']} - {row['venue']}"):
+                p_list = [p.strip() for p in str(row['players']).split(",") if p.strip() and str(row['players']) != "nan"]
+                st.write(f"**Participantes ({len(p_list)}):** {', '.join(p_list)}")
