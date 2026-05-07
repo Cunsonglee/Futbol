@@ -87,30 +87,50 @@ with tab_votar:
     df_v = load_data("Votos")
     df_m = load_data("Miembros")
     
+    # 获取接下来的周六
     sabs = get_next_saturdays()
-    v_fecha = st.selectbox("Día (Sábado):", sabs)
-    v_turno = st.radio("Turno:", ["Mañana", "Tarde"])
-    v_user = st.selectbox("Quién eres:", ["-- Seleccionar --"] + (df_m['name'].tolist() if not df_m.empty else []), key="voter_name")
     
-    if st.button("Enviar Voto"):
-        if v_user != "-- Seleccionar --":
-            exists = df_v[(df_v['fecha'] == v_fecha) & (df_v['turno'] == v_turno) & (df_v['usuario'] == v_user)]
-            if exists.empty:
-                new_v = pd.DataFrame([{"fecha": v_fecha, "turno": v_turno, "usuario": v_user}])
-                df_v = pd.concat([df_v, new_v], ignore_index=True)
-                save_data("Votos", df_v)
-                st.success("¡Voto registrado!")
-                st.rerun()
+    # 使用表单包裹投票控件，这样可以一次性提交，减少页面刷新次数
+    with st.form("form_votacion"):
+        v_fecha = st.selectbox("Selecciona el día (Sábado):", sabs)
+        v_turno = st.radio("Selecciona el turno:", ["Mañana", "Tarde"])
+        
+        # 这里的 key 必须唯一
+        lista_miembros = ["-- Seleccionar --"] + (df_m['name'].tolist() if not df_m.empty else [])
+        v_user = st.selectbox("¿Quién eres?", lista_miembros)
+        
+        submit_voto = st.form_submit_button("Enviar Voto")
+        
+        if submit_voto:
+            if v_user != "-- Seleccionar --":
+                # 检查是否已经投过票了
+                exists = df_v[(df_v['fecha'] == v_fecha) & (df_v['turno'] == v_turno) & (df_v['usuario'] == v_user)]
+                
+                if exists.empty:
+                    new_v = pd.DataFrame([{"fecha": v_fecha, "turno": v_turno, "usuario": v_user}])
+                    df_v = pd.concat([df_v, new_v], ignore_index=True)
+                    save_data("Votos", df_v)
+                    st.success(f"¡Gracias {v_user}! Tu voto ha sido registrado para el {v_fecha} por la {v_turno}.")
+                    # 注意：如果这里用了 st.rerun()，上面的成功提示会闪现消失。
+                    # 建议不在这里写 rerun，或者让用户手动刷新查看结果。
+                else:
+                    st.warning(f"Atención: {v_user}, ya has votado por este turno anteriormente.")
             else:
-                st.warning("Ya has votado por esta opción.")
+                st.error("Por favor, selecciona tu nombre antes de votar.")
 
     st.divider()
-    st.write("📊 **Estado de las votaciones:**")
-    if not df_v.empty:
-        res = df_v.groupby(['fecha', 'turno']).size().reset_index(name='count')
+    st.write("📊 **Estado actual de las votaciones:**")
+    
+    # 重新加载数据以显示最新结果
+    df_v_display = load_data("Votos")
+    if not df_v_display.empty:
+        # 统计每个日期时段的票数
+        res = df_v_display.groupby(['fecha', 'turno']).size().reset_index(name='count')
         for _, r in res.iterrows():
+            # 这里的颜色根据人数变化
             color = "green" if r['count'] >= 10 else "orange"
-            st.write(f"📅 {r['fecha']} ({r['turno']}): :{color}[{r['count']}/10 votos]")
+            st.write(f"📅 **{r['fecha']} ({r['turno']})**")
+            st.markdown(f"Progreso: :{color}[{r['count']} / 10 votos]")
             st.progress(min(r['count'] / 10, 1.0))
 
 # --- TAB 3: PUBLICAR (Solo si hay >= 10 votos) ---
