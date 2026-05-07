@@ -1,6 +1,6 @@
-streamlit
+streamlit>=1.28.0
+st-gsheets-connection>=0.0.3
 pandas
 requests
 beautifulsoup4
-st-gsheets-connection
 pytz
