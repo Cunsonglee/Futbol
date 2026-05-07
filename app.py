@@ -12,7 +12,7 @@ st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="center
 
 # --- IMPORTANTE: Tu URL de Google Sheets ---
 MAIN_URL = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
-conn = st.connection("gsheets", type=GSheetsConnection)
+conn = st.connection("gsheets", GSheetsConnection)
 
 def load_data(worksheet):
     try:
