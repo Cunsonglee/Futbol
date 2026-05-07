@@ -7,34 +7,33 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import pytz 
 
-# ================= 1. 基础配置 =================
+# ================= 1. CONFIGURACIÓN BÁSICA =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
 
-# --- ⚠️ 重要：在这里放入你的 Google Sheet 完整链接 ---
-# 确保这个表格里有三个 Tab (工作表)，名称分别是: Eventos, Campos, Miembros
+# --- ⚠️ IMPORTANTE: Pon aquí el enlace de tu Google Sheet único ---
 MAIN_URL = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_sheet_data(worksheet_name):
-    # 使用 spreadsheet 参数明确指定链接，防止报错
+    """Carga datos con caché de 5 min para mejorar la velocidad"""
     try:
         return conn.read(spreadsheet=MAIN_URL, worksheet=worksheet_name, ttl=300).dropna(how="all")
     except Exception as e:
-        st.error(f"读取数据失败 (Tab: {worksheet_name}): {e}")
+        st.error(f"Error al cargar la pestaña {worksheet_name}: {e}")
         return pd.DataFrame()
 
 def save_sheet_data(worksheet_name, df):
-    # 使用 create 方法覆盖更新数据
+    """Guarda datos y limpia la caché"""
     try:
         conn.create(spreadsheet=MAIN_URL, worksheet=worksheet_name, data=df)
-        st.cache_data.clear() # 更新后清除缓存，确保数据实时
+        st.cache_data.clear() 
     except Exception as e:
-        st.error(f"保存数据失败 (Tab: {worksheet_name}): {e}")
+        st.error(f"Error al guardar en {worksheet_name}: {e}")
 
-# ================= 2. 辅助函数 =================
+# ================= 2. FUNCIONES AUXILIARES =================
 def fetch_venue_name(url):
-    """只在点击按钮时触发的爬虫"""
+    """Extrae el nombre del lugar desde Google Maps"""
     try:
         if "/place/" in url:
             part = url.split("/place/")[1].split("/")[0]
@@ -56,14 +55,14 @@ def formatear_precio(is_free, price, num, unit):
         return f"{float(price):.2f} € / {int(num)} {unit_str}"
     except: return "No especificado"
 
-# ================= 3. UI 布局 (Tabs 标签页) =================
-st.title("⚽ 管理系统")
+# ================= 3. DISEÑO DE INTERFAZ (TABS) =================
+st.title("⚽ Gestión del Club")
 
 tab_inicio, tab_publicar, tab_campos, tab_miembros, tab_historial = st.tabs([
     "🏠 Inicio", "📅 Publicar", "🥅 Campos", "🤼‍♂️ Miembros", "⏳ Historial"
 ])
 
-# --- TAB: 首页 ---
+# --- TAB: 🏠 Inicio ---
 with tab_inicio:
     st.subheader("Próximo Partido")
     df_e = load_sheet_data("Eventos")
@@ -73,7 +72,6 @@ with tab_inicio:
     if not df_e.empty and 'datetime' in df_e.columns:
         tz = pytz.timezone('Europe/Madrid') 
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
-        # 转换并排序未来比赛
         df_e['datetime'] = df_e['datetime'].astype(str)
         future_events = df_e[df_e['datetime'] >= now].sort_values("datetime")
         
@@ -90,26 +88,25 @@ with tab_inicio:
             
             st.info(f"**⏰ Fecha:** {event['datetime']}\n\n**🏟️ Campo:** [{event['venue']}]({map_link})\n\n**💰 Precio:** {precio}")
             
-            # 报名名单处理
             players_str = str(event.get('players', ""))
             current_players = [p.strip() for p in players_str.split(",") if p.strip() and players_str != "nan"]
             
-            # 过滤未报名成员
             all_m = sorted(df_m['name'].tolist()) if not df_m.empty else []
             available = [m for m in all_m if m not in current_players]
             
             st.write("---")
-            sel = st.selectbox("选择你的名字报名:", ["-- Seleccionar --"] + available)
+            st.subheader("🙋‍♂️ Inscripción")
+            sel = st.selectbox("Selecciona tu nombre para inscribirte:", ["-- Seleccionar --"] + available)
             if st.button("Confirmar Inscripción", type="primary"):
                 if sel != "-- Seleccionar --":
                     current_players.append(sel)
                     df_e.at[idx, 'players'] = ",".join(current_players)
                     save_sheet_data("Eventos", df_e)
-                    st.success(f"{sel} 报名成功!")
+                    st.success(f"¡{sel} inscrito con éxito!")
                     st.rerun()
             
             st.divider()
-            st.write(f"🏃‍♂️ **已报名人数: {len(current_players)}**")
+            st.write(f"🏃‍♂️ **Inscritos actualmente: {len(current_players)}**")
             for p in current_players:
                 c1, c2 = st.columns([5, 1])
                 c1.write(f"✅ {p}")
@@ -119,90 +116,97 @@ with tab_inicio:
                     save_sheet_data("Eventos", df_e)
                     st.rerun()
         else:
-            st.info("目前没有待举办的比赛。")
+            st.info("No hay partidos programados próximamente.")
 
-# --- TAB: 发布比赛 ---
+# --- TAB: 📅 Publicar ---
 with tab_publicar:
-    st.subheader("发布新比赛")
+    st.subheader("Programar Nuevo Partido")
     df_c = load_sheet_data("Campos")
     if df_c.empty:
-        st.warning("请先在 Campos 标签页添加球场。")
+        st.warning("Por favor, añade primero un campo en la pestaña 'Campos'.")
     else:
         with st.form("pub_form"):
-            d = st.date_input("日期")
-            t = st.time_input("时间")
-            venue = st.selectbox("选择球场", df_c['name'].tolist())
-            if st.form_submit_button("发布"):
+            d = st.date_input("Fecha")
+            t = st.time_input("Hora")
+            venue = st.selectbox("Seleccionar Campo", df_c['name'].tolist())
+            if st.form_submit_button("Publicar Partido"):
                 dt_str = f"{d.strftime('%Y-%m-%d')} {t.strftime('%H:%M')}"
                 df_e = load_sheet_data("Eventos")
                 new_row = pd.DataFrame([{"datetime": dt_str, "venue": venue, "players": ""}])
                 df_e = pd.concat([df_e, new_row], ignore_index=True)
                 save_sheet_data("Eventos", df_e)
-                st.success("发布成功！")
+                st.success("¡Partido publicado con éxito!")
                 st.rerun()
 
-# --- TAB: 球场管理 ---
+# --- TAB: 🥅 Campos ---
 with tab_campos:
-    st.subheader("球场数据管理")
+    st.subheader("Gestión de Campos de Fútbol")
     df_c = load_sheet_data("Campos")
     with st.form("campo_form"):
-        u = st.text_input("Google Maps 链接")
-        free = st.checkbox("免费球场")
+        u = st.text_input("Enlace de Google Maps")
+        free = st.checkbox("Campo gratuito")
         col1, col2, col3 = st.columns(3)
-        price = col1.number_input("价格", min_value=0.0)
-        num = col2.number_input("数值", min_value=1, value=1)
-        unit = col3.selectbox("单位", ["hora", "día", "minuto"])
-        if st.form_submit_button("抓取并保存"):
+        price = col1.number_input("Precio", min_value=0.0)
+        num = col2.number_input("Cantidad", min_value=1, value=1)
+        unit = col3.selectbox("Unidad", ["hora", "día", "minuto"])
+        if st.form_submit_button("Extraer Nombre y Guardar"):
             if u:
-                with st.spinner("抓取球场名称中..."):
+                with st.spinner("Buscando nombre del campo..."):
                     name = fetch_venue_name(u)
                     if name:
                         new_c = pd.DataFrame([{"name": name, "map_url": u, "is_free": int(free), "price": price, "duration_num": num, "duration_unit": unit}])
                         df_c = pd.concat([df_c, new_c], ignore_index=True)
                         save_sheet_data("Campos", df_c)
-                        st.success(f"已添加: {name}")
+                        st.success(f"Campo añadido: {name}")
                         st.rerun()
-                    else: st.error("无法识别链接名称。")
+                    else: st.error("No se pudo identificar el nombre del lugar.")
 
     st.write("---")
+    st.write("### Lista de Campos")
     if not df_c.empty:
         for i, row in df_c.iterrows():
             c1, c2 = st.columns([4, 1])
             c1.markdown(f"🏟️ **[{row['name']}]({row['map_url']})**")
-            if c2.button("删除", key=f"c_{i}"):
+            if c2.button("Eliminar", key=f"c_{i}"):
                 df_c = df_c.drop(i).reset_index(drop=True)
                 save_sheet_data("Campos", df_c)
                 st.rerun()
 
-# --- TAB: 成员管理 ---
+# --- TAB: 🤼‍♂️ Miembros ---
 with tab_miembros:
-    st.subheader("成员名单")
+    st.subheader("Lista de Miembros")
     df_m = load_sheet_data("Miembros")
     with st.form("m_form"):
-        name = st.text_input("新成员姓名")
-        if st.form_submit_button("添加"):
+        name = st.text_input("Nombre del nuevo miembro")
+        if st.form_submit_button("Añadir Miembro"):
             if name:
                 df_m = pd.concat([df_m, pd.DataFrame([{"name": name}])], ignore_index=True)
                 save_sheet_data("Miembros", df_m)
+                st.success(f"¡{name} añadido!")
                 st.rerun()
-    st.write(f"总人数: {len(df_m)}")
+    
+    st.write(f"Total de miembros: {len(df_m)}")
     for i, row in df_m.iterrows():
         c1, c2 = st.columns([4, 1])
         c1.write(f"👤 {row['name']}")
-        if c2.button("🗑️", key=f"m_{i}"):
+        if c2.button("Eliminar", key=f"m_{i}"):
             df_m = df_m.drop(i).reset_index(drop=True)
             save_sheet_data("Miembros", df_m)
             st.rerun()
 
-# --- TAB: 历史记录 ---
+# --- TAB: ⏳ Historial ---
 with tab_historial:
-    st.subheader("比赛历史记录")
+    st.subheader("Historial de Partidos Pasados")
     df_e = load_sheet_data("Eventos")
     if not df_e.empty:
         tz = pytz.timezone('Europe/Madrid')
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
         past = df_e[df_e['datetime'] < now].sort_values("datetime", ascending=False)
-        for _, row in past.iterrows():
-            with st.expander(f"📅 {row['datetime']} - {row['venue']}"):
-                p_list = str(row['players']).split(",")
-                st.write(f"参赛者 ({len([x for x in p_list if x.strip()])}): {row['players']}")
+        if not past.empty:
+            for _, row in past.iterrows():
+                with st.expander(f"📅 {row['datetime']} - {row['venue']}"):
+                    p_list = str(row['players']).split(",")
+                    n_players = len([x for x in p_list if x.strip() and x != "nan"])
+                    st.write(f"**Participantes ({n_players}):** {row['players']}")
+        else:
+            st.info("No hay partidos en el historial.")
