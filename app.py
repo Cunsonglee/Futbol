@@ -8,7 +8,7 @@ import urllib.parse
 import pytz 
 
 # ================= 1. CONFIGURACIÓN BÁSICA =================
-st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
+st.set_page_config(page_title="Club de Fútbol", page_icon="", layout="centered")
 
 # --- ⚠️ IMPORTANTE: Pon aquí el enlace de tu Google Sheet único ---
 MAIN_URL = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
