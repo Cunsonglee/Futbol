@@ -56,7 +56,7 @@ def formatear_precio(is_free, price, num, unit):
     except: return "No especificado"
 
 # ================= 3. DISEÑO DE INTERFAZ (TABS) =================
-st.title("⚽ Gestión del Club")
+st.title(" Gestión del Club")
 
 tab_inicio, tab_publicar, tab_campos, tab_miembros, tab_historial = st.tabs([
     "🏠 Inicio", "📅 Publicar", "🥅 Campos", "🤼‍♂️ Miembros", "⏳ Historial"
