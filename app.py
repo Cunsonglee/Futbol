@@ -225,7 +225,19 @@ with tab_inicio:
             event   = future_events.iloc[0]
             players = [p.strip() for p in str(event.get('players', "")).split(",")
                        if p.strip() and str(event.get('players', "")) != "nan"]
-            st.info(f"**⏰ Fecha:** {event['datetime']}\n\n**🏟️ Campo:** {event.get('venue','')}")
+            venue_name = event.get('venue', '')
+            # Buscar la URL del campo en Campos.csv
+            df_c_ini = load_sheet_data("Campos")
+            venue_url = ""
+            if not df_c_ini.empty and 'name' in df_c_ini.columns and 'map_url' in df_c_ini.columns:
+                match = df_c_ini[df_c_ini['name'] == venue_name]
+                if not match.empty:
+                    venue_url = str(match.iloc[0]['map_url'])
+            campo_html = f'<a href="{venue_url}" target="_blank">{venue_name}</a>' if venue_url else venue_name
+            st.markdown(
+                f"**⏰ Fecha:** {event['datetime']}<br>**🏟️ Campo:** {campo_html}",
+                unsafe_allow_html=True
+            )
             st.write(f"🏃‍♂️ **Inscritos ({len(players)}):** {', '.join(players)}")
         else:
             st.info("No hay partidos próximos programados.")
@@ -464,8 +476,9 @@ with tab_campos:
 # TAB: 🤼‍♂️ Miembros
 # ─────────────────────────────────────────────────────────
 with tab_miembros:
-    st.subheader("🤼‍♂️ Miembros del Club")
     df_m = load_sheet_data("Miembros")
+    total_m = len(df_m) if not df_m.empty and 'name' in df_m.columns else 0
+    st.subheader(f"🤼‍♂️ Miembros del Club  ({total_m})")
 
     with st.form("m_form"):
         new_name = st.text_input("Nombre del miembro")
