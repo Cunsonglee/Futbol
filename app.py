@@ -265,49 +265,81 @@ with tab_votar:
                 votos_actuales[f_key] = jugs
 
     # ══════════════════════════════════════════════════════
-    # SECCIÓN 1: Calendario compacto
+    # SECCIÓN 1: Calendario — lista vertical (mobile-friendly)
     # ══════════════════════════════════════════════════════
     st.markdown("**📅 Selecciona fecha y franja horaria:**")
     slots_by_date, start_of_week = get_calendar_slots_grouped()
     selected_slots = []
 
-    # CSS para hacer las celdas más compactas y con aspecto de calendario
     st.markdown("""
     <style>
-    div[data-testid="stHorizontalBlock"] > div { padding: 0 2px !important; }
-    .cal-header { text-align:center; font-size:0.72rem; font-weight:700;
-                  color:#555; padding:3px 0; border-bottom:2px solid #4CAF50; margin-bottom:4px; }
-    .cal-day    { text-align:center; font-size:0.75rem; font-weight:600; color:#1a73e8; margin-bottom:2px; }
-    .cal-empty  { text-align:center; font-size:0.65rem; color:#ccc; padding:6px 0; }
-    .vote-badge { display:inline-block; background:#e8f5e9; color:#2e7d32;
-                  border-radius:10px; padding:1px 7px; font-size:0.7rem; font-weight:600; margin-left:4px; }
-    .vote-badge-warn { background:#fff3e0; color:#e65100; }
+    .dia-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        margin-bottom: 4px;
+        background: rgba(255,255,255,0.04);
+    }
+    .dia-label {
+        min-width: 90px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: #1a73e8;
+        white-space: nowrap;
+    }
+    .dia-sep {
+        border: none;
+        border-top: 1px solid rgba(128,128,128,0.2);
+        margin: 8px 0 4px 0;
+    }
+    .semana-label {
+        font-size: 0.7rem;
+        font-weight: 600;
+        color: #888;
+        letter-spacing: 0.05em;
+        margin: 10px 0 2px 0;
+        text-transform: uppercase;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-    dias_cortos = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-    cols_h = st.columns(7)
-    for i, d in enumerate(dias_cortos):
-        cols_h[i].markdown(f'<div class="cal-header">{d}</div>', unsafe_allow_html=True)
-
+    dias_es = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
     curr = start_of_week
     for w in range(6):
-        cols = st.columns(7)
+        # Encabezado de semana
+        lun = curr.strftime("%d/%m")
+        dom = (curr + timedelta(days=6)).strftime("%d/%m")
+        st.markdown(f'<div class="semana-label">Semana {lun} – {dom}</div>', unsafe_allow_html=True)
+
+        hay_slots_semana = False
         for i in range(7):
-            d_str = curr.strftime('%Y-%m-%d')
-            with cols[i]:
-                st.markdown(f'<div class="cal-day">{curr.strftime("%d/%m")}</div>', unsafe_allow_html=True)
-                if d_str in slots_by_date:
-                    for franja in slots_by_date[d_str]:
-                        s_val  = f"{d_str} ({franja})"
-                        n_vots = len(votos_actuales.get(s_val, []))
-                        # Etiqueta compacta con contador de votos actuales
-                        label  = f"{'🌅' if franja=='Mañana' else '🌆'} {franja[:3]} ({n_vots}✓)"
+            d_str  = curr.strftime("%Y-%m-%d")
+            nombre = dias_es[i]
+            fecha  = curr.strftime("%d/%m")
+            if d_str in slots_by_date:
+                hay_slots_semana = True
+                franjas = slots_by_date[d_str]
+                # Una fila por día con checkboxes en columnas a la derecha
+                col_lbl, *col_franjas = st.columns([2] + [1]*len(franjas))
+                col_lbl.markdown(
+                    f'<div style="padding-top:6px;font-size:0.82rem;font-weight:700;color:#1a73e8;">'
+                    f'{nombre} {fecha}</div>',
+                    unsafe_allow_html=True
+                )
+                for j, franja in enumerate(franjas):
+                    s_val  = f"{d_str} ({franja})"
+                    n_vots = len(votos_actuales.get(s_val, []))
+                    icon   = "🌅" if franja == "Mañana" else "🌆"
+                    label  = f"{icon} {franja[:3]}\n({n_vots}✓)"
+                    with col_franjas[j]:
                         if st.checkbox(label, key=f"chk_{s_val}"):
                             selected_slots.append(s_val)
-                else:
-                    st.markdown('<div class="cal-empty">—</div>', unsafe_allow_html=True)
             curr += timedelta(days=1)
+
+        if not hay_slots_semana:
+            st.markdown('<div style="font-size:0.75rem;color:#aaa;padding:2px 0 6px 0;">Sin disponibilidad esta semana</div>', unsafe_allow_html=True)
 
     st.divider()
 
