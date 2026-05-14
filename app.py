@@ -55,9 +55,9 @@ def formatear_precio(is_free, price, num, unit):
         return f"{float(price):.2f} € / {int(num)} {unit_str}"
     except: return "No especificado"
 
-# --- NUEVA FUNCIÓN: LEER GOOGLE CALENDAR (Próximas 6 semanas con franja horaria) ---
+# --- NUEVA FUNCIÓN: LEER GOOGLE CALENDAR ---
 def get_upcoming_calendar_slots():
-    """Lee los eventos de las próximas 6 semanas y muestra la hora de inicio y fin"""
+    """Lee los eventos de las próximas 6 semanas y clasifica Mañana/Tarde"""
     try:
         SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
         creds_info = st.secrets["connections"]["gsheets"]
@@ -67,14 +67,13 @@ def get_upcoming_calendar_slots():
         
         calendar_id = '07854ef03649a28b9507946bb4f7af183d0cf1f49535580916c12c2a4fd1933c@group.calendar.google.com'
         
-        # 设定时间范围：从"现在"到"未来6个星期 (6 weeks)"
         now = datetime.utcnow()
-        time_max = now + timedelta(weeks=6)
+        time_max = now + timedelta(weeks=6) # 限制未来6个星期
         
         events_result = service.events().list(
             calendarId=calendar_id, 
             timeMin=now.isoformat() + 'Z',
-            timeMax=time_max.isoformat() + 'Z',  # 限制在 6 个星期内
+            timeMax=time_max.isoformat() + 'Z',
             singleEvents=True, 
             orderBy='startTime').execute()
             
@@ -86,15 +85,23 @@ def get_upcoming_calendar_slots():
             end_info = event.get('end', {})
             summary = event.get('summary', 'Fútbol')
             
-            # 判断是否有具体的时间段 (Franja horaria)
             if 'dateTime' in start_info and 'dateTime' in end_info:
                 start_dt = datetime.fromisoformat(start_info['dateTime'].replace('Z', '+00:00'))
                 end_dt = datetime.fromisoformat(end_info['dateTime'].replace('Z', '+00:00'))
                 
-                # 格式化输出为: 2026-05-17 (07:00 - 13:00) | Fútbol
-                slot_name = f"{start_dt.strftime('%Y-%m-%d')} ({start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}) | {summary}"
+                start_time_str = start_dt.strftime('%H:%M')
+                end_time_str = end_dt.strftime('%H:%M')
+                
+                # 判断 Mañana 或 Tarde
+                if start_time_str == "07:00" and end_time_str == "13:00":
+                    franja = "Mañana"
+                elif (start_time_str == "17:00" and end_time_str == "23:30") or (start_time_str == "13:00" and end_time_str == "23:30"):
+                    franja = "Tarde"
+                else:
+                    franja = f"{start_time_str} - {end_time_str}"
+                
+                slot_name = f"{start_dt.strftime('%Y-%m-%d')} ({franja}) | {summary}"
             else:
-                # Todo el día (全天活动)
                 date_str = start_info.get('date', '')
                 slot_name = f"{date_str} (Todo el día) | {summary}"
                 
@@ -104,7 +111,7 @@ def get_upcoming_calendar_slots():
     except Exception as e:
         st.error(f"No se pudo conectar al Calendario: {e}")
         return []
-
+        
 # ================= 3. DISEÑO DE INTERFAZ (TABS) =================
 st.title("⚽ Gestión del Club")
 
@@ -167,9 +174,9 @@ with tab_inicio:
         else:
             st.info("No hay partidos programados próximamente. ¡Ve a la pestaña 'Votar'!")
 
-# --- TAB: 🗳️ Votar (NUEVO: Integrado con Google Calendar) ---
+# --- TAB: 🗳️ Votar ---
 with tab_votar:
-    st.subheader("Votar y Organizar Próximos Partidos")
+    st.subheader("Inscribirse y Organizar Partidos")
     
     df_v = load_sheet_data("Votaciones")
     if df_v.empty or 'Fecha' not in df_v.columns:
@@ -178,58 +185,69 @@ with tab_votar:
     df_m = load_sheet_data("Miembros")
     all_m = sorted(df_m['name'].tolist()) if not df_m.empty else []
 
-    # 1. Proponer fecha desde Google Calendar
-    with st.expander("➕ Abrir inscripción desde el Calendario"):
-        with st.spinner("Sincronizando con Google Calendar..."):
-            calendar_slots = get_upcoming_calendar_slots()
+    # ---------------- 1. ZONA DE INSCRIPCIÓN (Multi-selección) ----------------
+    st.write("### 1. Seleccionar Fechas y Jugadores")
+    with st.spinner("Cargando calendario (próximas 6 semanas)..."):
+        calendar_slots = get_upcoming_calendar_slots()
         
-        if calendar_slots:
-            selected_slot = st.selectbox("Selecciona un horario de tu calendario:", calendar_slots)
-            if st.button("Abrir Votación para esta fecha"):
-                if selected_slot not in df_v['Fecha'].astype(str).values:
-                    nueva_fila = pd.DataFrame([{"Fecha": selected_slot, "Jugadores": ""}])
-                    df_v = pd.concat([df_v, nueva_fila], ignore_index=True)
-                    save_sheet_data("Votaciones", df_v)
-                    st.success(f"Inscripción abierta para: {selected_slot}")
-                    st.rerun()
-                else:
-                    st.warning("Esta fecha ya está abierta para votación.")
-        else:
-            st.write("No se encontraron eventos futuros en el calendario.")
+    if calendar_slots:
+        st.write("**1. Selecciona las fechas (Puedes marcar varias):**")
+        selected_slots = []
+        # Mostrar como casillas (Checkboxes / 框框)
+        for slot in calendar_slots:
+            if st.checkbox(slot, key=f"chk_{slot}"):
+                selected_slots.append(slot)
+        
+        st.write("") # Espacio
+        st.write("**2. Selecciona los jugadores (Menú desplegable múltiple):**")
+        # Mostrar como desplegable múltiple (Multiselect / 下拉多选)
+        selected_members = st.multiselect("Elige a los miembros:", all_m)
+        
+        if st.button("Confirmar Jugadores en Fechas Seleccionadas", type="primary"):
+            if not selected_slots:
+                st.warning("⚠️ Debes seleccionar al menos una fecha.")
+            elif not selected_members:
+                st.warning("⚠️ Debes seleccionar al menos un jugador.")
+            else:
+                # Guardar los jugadores en TODAS las fechas seleccionadas
+                for slot in selected_slots:
+                    if slot in df_v['Fecha'].astype(str).values:
+                        # Si la fecha ya existe, añadimos a los que no estén
+                        idx = df_v[df_v['Fecha'].astype(str) == slot].index[0]
+                        current_jugadores = str(df_v.at[idx, 'Jugadores'])
+                        lista_jugadores = [p.strip() for p in current_jugadores.split(",") if p.strip() and current_jugadores != "nan"]
+                        for m in selected_members:
+                            if m not in lista_jugadores:
+                                lista_jugadores.append(m)
+                        df_v.at[idx, 'Jugadores'] = ",".join(lista_jugadores)
+                    else:
+                        # Si es una fecha nueva, la creamos
+                        nueva_fila = pd.DataFrame([{"Fecha": slot, "Jugadores": ",".join(selected_members)}])
+                        df_v = pd.concat([df_v, nueva_fila], ignore_index=True)
+                
+                save_sheet_data("Votaciones", df_v)
+                st.success("¡Asistencia confirmada correctamente!")
+                st.rerun()
+    else:
+        st.info("No hay eventos en las próximas 6 semanas en el calendario.")
 
     st.divider()
 
-    # 2. Mostrar fechas abiertas para apuntarse
+    # ---------------- 2. ZONA DE PUBLICACIÓN ----------------
+    st.write("### 2. Estado de Votaciones y Publicar Oficialmente")
     if not df_v.empty:
         for idx, row in df_v.iterrows():
             fecha = str(row['Fecha'])
             jugadores_str = str(row['Jugadores'])
             jugadores_actuales = [p.strip() for p in jugadores_str.split(",") if p.strip() and jugadores_str != "nan"]
             
-            st.write(f"### 📅 {fecha}")
-            st.write(f"🏃‍♂️ **Apuntados ({len(jugadores_actuales)}):** {', '.join(jugadores_actuales) if jugadores_actuales else 'Nadie todavía'}")
+            st.write(f"#### 📅 {fecha}")
+            st.write(f"🏃‍♂️ **Apuntados ({len(jugadores_actuales)}):** {', '.join(jugadores_actuales) if jugadores_actuales else 'Nadie'}")
             
-            # Anotarse
-            disponibles = [m for m in all_m if m not in jugadores_actuales]
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                sel = st.selectbox(f"Anotarme:", ["-- Seleccionar --"] + disponibles, key=f"sel_v_{fecha}")
-            with c2:
-                st.write("") 
-                st.write("")
-                if st.button("Anotarme", key=f"btn_v_{fecha}"):
-                    if sel != "-- Seleccionar --":
-                        jugadores_actuales.append(sel)
-                        df_v.at[idx, 'Jugadores'] = ",".join(jugadores_actuales)
-                        save_sheet_data("Votaciones", df_v)
-                        st.success(f"¡{sel} anotado!")
-                        st.rerun()
-            
-            # Publicar Oficialmente
             with st.expander(f"🚀 Publicar oficialmente este partido"):
                 df_c = load_sheet_data("Campos")
                 if not df_c.empty:
-                    # Extraer solo la fecha principal (Ej: "2026-05-17") de la cadena del calendario
+                    # Extraer la fecha limpia para la publicación final
                     fecha_limpia = fecha.split(" ")[0] if " " in fecha else fecha
                     
                     hora_encuentro = st.time_input("Hora de encuentro confirmada", key=f"hora_{fecha}")
@@ -239,12 +257,10 @@ with tab_votar:
                         dt_str = f"{fecha_limpia} {hora_encuentro.strftime('%H:%M')}"
                         df_e = load_sheet_data("Eventos")
                         
-                        # Guardar en Eventos
                         new_row = pd.DataFrame([{"datetime": dt_str, "venue": campo_seleccionado, "players": ",".join(jugadores_actuales)}])
                         df_e = pd.concat([df_e, new_row], ignore_index=True)
                         save_sheet_data("Eventos", df_e)
                         
-                        # Borrar de Votaciones
                         df_v = df_v.drop(idx).reset_index(drop=True)
                         save_sheet_data("Votaciones", df_v)
                         
@@ -252,9 +268,9 @@ with tab_votar:
                         st.rerun()
                 else:
                     st.warning("No hay campos. Añade uno en la pestaña 'Campos'.")
-            st.divider()
+            st.write("---")
     else:
-        st.info("No hay inscripciones abiertas. ¡Abre una desde el calendario arriba!")
+        st.info("Todavía no hay nadie apuntado a ningún partido.")
 
 # --- TAB: 📅 Calendario ---
 with tab_calendario:
