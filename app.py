@@ -49,7 +49,10 @@ def load_sheet_data(worksheet_name, ttl=None):
 
     try:
         df = pd.read_csv(path, dtype=str)
-        return df.dropna(how="all")
+        # Limpiar nombres de columnas (quitar espacios accidentales)
+        df.columns = [c.strip() for c in df.columns]
+        df = df.dropna(how="all").reset_index(drop=True)
+        return df
     except Exception as e:
         st.error(f"Error al leer {path}: {e}")
         return pd.DataFrame(columns=CSV_DEFAULTS.get(worksheet_name, []))
@@ -259,8 +262,9 @@ with tab_votar:
 
     df_v = load_sheet_data("Votaciones")
     if not df_v.empty and 'Fecha' in df_v.columns:
-        for idx, row in df_v.iterrows():
-            f     = str(row['Fecha'])
+        for i in range(len(df_v)):
+            row = df_v.iloc[i]
+            f     = str(row.get('Fecha', ''))
             j_str = str(row.get('Jugadores', ''))
             jugadores = [p.strip() for p in j_str.split(",") if p.strip() and j_str != "nan"]
 
@@ -341,16 +345,19 @@ with tab_campos:
 
     st.write("### Campos Registrados")
     df_c = load_sheet_data("Campos")   # recargar tras posible guardado
-    if not df_c.empty:
-        for i, row in df_c.iterrows():
+    if not df_c.empty and 'name' in df_c.columns and 'map_url' in df_c.columns:
+        for i in range(len(df_c)):
+            row = df_c.iloc[i]
             c1, c2 = st.columns([4, 1])
             precio_f = formatear_precio(
                 row.get('is_free', 0), row.get('price', 0),
                 row.get('duration_num', 1), row.get('duration_unit', 'hora')
             )
-            c1.markdown(f"🏟️ **[{row['name']}]({row['map_url']})** — {precio_f}")
+            nombre   = str(row.get('name', ''))
+            map_url  = str(row.get('map_url', ''))
+            c1.markdown(f"🏟️ **[{nombre}]({map_url})** — {precio_f}")
             if c2.button("Eliminar", key=f"del_c_{i}"):
-                df_c_new = df_c.drop(i).reset_index(drop=True)
+                df_c_new = df_c.drop(index=i).reset_index(drop=True)
                 save_sheet_data("Campos", df_c_new)
                 st.rerun()
 
@@ -371,12 +378,13 @@ with tab_miembros:
                 st.rerun()
 
     df_m = load_sheet_data("Miembros")   # recargar
-    if not df_m.empty:
-        for i, r in df_m.iterrows():
+    if not df_m.empty and 'name' in df_m.columns:
+        for i in range(len(df_m)):
+            r = df_m.iloc[i]
             c1, c2 = st.columns([4, 1])
-            c1.write(f"👤 {r['name']}")
+            c1.write(f"👤 {r.get('name', '')}")
             if c2.button("Eliminar", key=f"m_del_{i}"):
-                save_sheet_data("Miembros", df_m.drop(i).reset_index(drop=True))
+                save_sheet_data("Miembros", df_m.drop(index=i).reset_index(drop=True))
                 st.rerun()
 
 # ─────────────────────────────────────────────────────────
