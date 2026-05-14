@@ -368,10 +368,10 @@ with tab_votar:
                 continue
 
             n      = len(jugadores)
-            falta  = max(0, 5 - n)
-            color  = "#e8f5e9" if n >= 5 else "#fff8e1"
-            border = "#4CAF50" if n >= 5 else "#FFB300"
-            barra  = min(n / 5, 1.0)
+            falta  = max(0, 10 - n)
+            color  = "#e8f5e9" if n >= 10 else "#fff8e1"
+            border = "#4CAF50" if n >= 10 else "#FFB300"
+            barra  = min(n / 10, 1.0)
 
             # Tarjeta con barra de progreso visual
             st.markdown(f"""
@@ -380,7 +380,7 @@ with tab_votar:
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <span style="font-weight:700; font-size:0.85rem;">📅 {f}</span>
                     <span style="font-size:0.8rem; font-weight:600; color:{border};">
-                        {n}/5 jugadores{"  🟢 Listo!" if n >= 5 else f"  ⏳ faltan {falta}"}
+                        {n}/10 jugadores{"  🟢 Listo!" if n >= 10 else f"  ⏳ faltan {falta}"}
                     </span>
                 </div>
                 <div style="background:#ddd; border-radius:4px; height:5px; margin:5px 0;">
@@ -391,7 +391,7 @@ with tab_votar:
             """, unsafe_allow_html=True)
 
             # Botón publicar — solo visible si hay 5+
-            if n >= 5:
+            if n >= 10:
                 with st.expander("🚀 Publicar partido", expanded=False):
                     hc = st.time_input("Hora del partido", key=f"h_{f}")
                     campo = st.selectbox("Campo", campo_opts, key=f"c_{f}")
