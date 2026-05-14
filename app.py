@@ -8,12 +8,11 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import pytz 
 
-# --- NUEVOS IMPORTS PARA GOOGLE CALENDAR API ---
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
 # ================= 1. CONFIGURACIÓN BÁSICA =================
-st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
+st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="wide") # Cambiado a 'wide' para que quepan las 7 columnas
 
 MAIN_URL = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -55,63 +54,63 @@ def formatear_precio(is_free, price, num, unit):
         return f"{float(price):.2f} € / {int(num)} {unit_str}"
     except: return "No especificado"
 
-# --- NUEVA FUNCIÓN: LEER GOOGLE CALENDAR ---
-def get_upcoming_calendar_slots():
-    """Lee los eventos de las próximas 6 semanas y clasifica Mañana/Tarde"""
+# --- NUEVA FUNCIÓN: LEER CALENDARIO AGRUPADO POR FECHAS ---
+def get_calendar_slots_grouped():
+    """Lee 6 semanas empezando desde el lunes actual, agrupa por fecha"""
     try:
         SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-        
         service = build('calendar', 'v3', credentials=creds)
-        
         calendar_id = '07854ef03649a28b9507946bb4f7af183d0cf1f49535580916c12c2a4fd1933c@group.calendar.google.com'
         
-        now = datetime.utcnow()
-        time_max = now + timedelta(weeks=6) # 限制未来6个星期
+        tz = pytz.timezone('Europe/Madrid')
+        today = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_of_week = today - timedelta(days=today.weekday()) # Lunes de esta semana
+        time_max = start_of_week + timedelta(weeks=6)
         
         events_result = service.events().list(
             calendarId=calendar_id, 
-            timeMin=now.isoformat() + 'Z',
-            timeMax=time_max.isoformat() + 'Z',
+            timeMin=start_of_week.isoformat(),
+            timeMax=time_max.isoformat(),
             singleEvents=True, 
             orderBy='startTime').execute()
             
         events = events_result.get('items', [])
+        slots_by_date = {}
         
-        formatted_slots = []
         for event in events:
             start_info = event.get('start', {})
             end_info = event.get('end', {})
-            summary = event.get('summary', 'Fútbol')
             
             if 'dateTime' in start_info and 'dateTime' in end_info:
-                start_dt = datetime.fromisoformat(start_info['dateTime'].replace('Z', '+00:00'))
-                end_dt = datetime.fromisoformat(end_info['dateTime'].replace('Z', '+00:00'))
+                start_dt = datetime.fromisoformat(start_info['dateTime']).astimezone(tz)
+                end_dt = datetime.fromisoformat(end_info['dateTime']).astimezone(tz)
+                date_str = start_dt.strftime('%Y-%m-%d')
                 
                 start_time_str = start_dt.strftime('%H:%M')
                 end_time_str = end_dt.strftime('%H:%M')
                 
-                # 判断 Mañana 或 Tarde
                 if start_time_str == "07:00" and end_time_str == "13:00":
                     franja = "Mañana"
                 elif (start_time_str == "17:00" and end_time_str == "23:30") or (start_time_str == "13:00" and end_time_str == "23:30"):
                     franja = "Tarde"
                 else:
-                    franja = f"{start_time_str} - {end_time_str}"
-                
-                slot_name = f"{start_dt.strftime('%Y-%m-%d')} ({franja}) | {summary}"
+                    franja = f"{start_time_str}-{end_time_str}"
             else:
                 date_str = start_info.get('date', '')
-                slot_name = f"{date_str} (Todo el día) | {summary}"
+                franja = "Todo el día"
                 
-            formatted_slots.append(slot_name)
-            
-        return formatted_slots
+            if date_str:
+                if date_str not in slots_by_date:
+                    slots_by_date[date_str] = []
+                slots_by_date[date_str].append(franja)
+                
+        return slots_by_date, start_of_week
     except Exception as e:
-        st.error(f"No se pudo conectar al Calendario: {e}")
-        return []
-        
+        st.error(f"Error Calendario: {e}")
+        return {}, datetime.now()
+
 # ================= 3. DISEÑO DE INTERFAZ (TABS) =================
 st.title("⚽ Gestión del Club")
 
@@ -135,7 +134,6 @@ with tab_inicio:
         if not future_events.empty:
             event = future_events.iloc[0]
             idx = future_events.index[0]
-
             v_info = df_c[df_c['name'] == event['venue']] if not df_c.empty else pd.DataFrame()
             precio, map_link = "No especificado", "#"
             if not v_info.empty:
@@ -179,62 +177,85 @@ with tab_votar:
     st.subheader("Inscribirse y Organizar Partidos")
     
     df_v = load_sheet_data("Votaciones")
-    if df_v.empty or 'Fecha' not in df_v.columns:
+    if df_v.empty:
         df_v = pd.DataFrame(columns=['Fecha', 'Jugadores'])
-
+    df_v['Fecha'] = df_v['Fecha'].astype(str) # Asegurar tipo string para evitar errores
+    
     df_m = load_sheet_data("Miembros")
     all_m = sorted(df_m['name'].tolist()) if not df_m.empty else []
 
-    # ---------------- 1. ZONA DE INSCRIPCIÓN (Multi-selección) ----------------
-    st.write("### 1. Seleccionar Fechas y Jugadores")
-    with st.spinner("Cargando calendario (próximas 6 semanas)..."):
-        calendar_slots = get_upcoming_calendar_slots()
+    # ---------------- 1. ZONA DE INSCRIPCIÓN (Vista Calendario Malla) ----------------
+    st.write("### 1. Seleccionar Fechas en el Calendario")
+    
+    with st.spinner("Cargando calendario (Próximas 6 semanas)..."):
+        slots_by_date, start_of_week = get_calendar_slots_grouped()
         
-    if calendar_slots:
-        st.write("**1. Selecciona las fechas (Puedes marcar varias):**")
-        selected_slots = []
-        # Mostrar como casillas (Checkboxes / 框框)
-        for slot in calendar_slots:
-            if st.checkbox(slot, key=f"chk_{slot}"):
-                selected_slots.append(slot)
-        
-        st.write("") # Espacio
-        st.write("**2. Selecciona los jugadores (Menú desplegable múltiple):**")
-        # Mostrar como desplegable múltiple (Multiselect / 下拉多选)
-        selected_members = st.multiselect("Elige a los miembros:", all_m)
-        
-        if st.button("Confirmar Jugadores en Fechas Seleccionadas", type="primary"):
-            if not selected_slots:
-                st.warning("⚠️ Debes seleccionar al menos una fecha.")
-            elif not selected_members:
-                st.warning("⚠️ Debes seleccionar al menos un jugador.")
-            else:
-                # Guardar los jugadores en TODAS las fechas seleccionadas
-                for slot in selected_slots:
-                    if slot in df_v['Fecha'].astype(str).values:
-                        # Si la fecha ya existe, añadimos a los que no estén
-                        idx = df_v[df_v['Fecha'].astype(str) == slot].index[0]
-                        current_jugadores = str(df_v.at[idx, 'Jugadores'])
-                        lista_jugadores = [p.strip() for p in current_jugadores.split(",") if p.strip() and current_jugadores != "nan"]
-                        for m in selected_members:
-                            if m not in lista_jugadores:
-                                lista_jugadores.append(m)
-                        df_v.at[idx, 'Jugadores'] = ",".join(lista_jugadores)
-                    else:
-                        # Si es una fecha nueva, la creamos
-                        nueva_fila = pd.DataFrame([{"Fecha": slot, "Jugadores": ",".join(selected_members)}])
-                        df_v = pd.concat([df_v, nueva_fila], ignore_index=True)
+    selected_slots = []
+    
+    # Nombres de los días
+    dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    
+    # Dibujar Cabeceras
+    cols_header = st.columns(7)
+    for i in range(7):
+        cols_header[i].markdown(f"<div style='text-align:center; font-weight:bold; background-color:#f0f2f6; padding:5px; border-radius:5px;'>{dias_semana[i]}</div>", unsafe_allow_html=True)
+    
+    st.write("") # Espacio
+    
+    # Dibujar la malla de 6 semanas
+    current_date = start_of_week
+    for week in range(6):
+        cols = st.columns(7)
+        for i in range(7):
+            date_str = current_date.strftime('%Y-%m-%d')
+            with cols[i]:
+                # Mostrar el día (Ej: 14/05)
+                st.markdown(f"<div style='text-align:center; font-size:12px; color:#555;'>{current_date.strftime('%d/%m')}</div>", unsafe_allow_html=True)
                 
-                save_sheet_data("Votaciones", df_v)
-                st.success("¡Asistencia confirmada correctamente!")
-                st.rerun()
-    else:
-        st.info("No hay eventos en las próximas 6 semanas en el calendario.")
+                if date_str in slots_by_date:
+                    for franja in slots_by_date[date_str]:
+                        slot_val = f"{date_str} ({franja})"
+                        # Casilla de verificación
+                        if st.checkbox(franja, key=f"chk_{slot_val}"):
+                            selected_slots.append(slot_val)
+                else:
+                    # Si no hay eventos
+                    st.markdown("<div style='text-align:center; font-size:14px; color:#aaa; margin-top:5px;'>NON</div>", unsafe_allow_html=True)
+            current_date += timedelta(days=1)
+        st.divider()
 
-    st.divider()
+    st.write("**2. Selecciona los jugadores:**")
+    selected_members = st.multiselect("Elige a los miembros (puedes buscar por nombre):", all_m)
+    
+    if st.button("Confirmar Jugadores en Fechas Seleccionadas", type="primary"):
+        if not selected_slots:
+            st.warning("⚠️ Debes marcar al menos una fecha en el calendario de arriba.")
+        elif not selected_members:
+            st.warning("⚠️ Debes seleccionar al menos un jugador de la lista desplegable.")
+        else:
+            # Guardar la información corregida
+            for slot in selected_slots:
+                if slot in df_v['Fecha'].values:
+                    # Si ya existe, añadir a los miembros sin duplicar
+                    idx = df_v.index[df_v['Fecha'] == slot][0]
+                    current_jugadores = str(df_v.at[idx, 'Jugadores'])
+                    lista_jugadores = [p.strip() for p in current_jugadores.split(",") if p.strip() and current_jugadores != "nan"]
+                    
+                    for m in selected_members:
+                        if m not in lista_jugadores:
+                            lista_jugadores.append(m)
+                    df_v.at[idx, 'Jugadores'] = ",".join(lista_jugadores)
+                else:
+                    # Crear nueva fila
+                    nueva_fila = pd.DataFrame([{"Fecha": slot, "Jugadores": ",".join(selected_members)}])
+                    df_v = pd.concat([df_v, nueva_fila], ignore_index=True)
+            
+            save_sheet_data("Votaciones", df_v)
+            st.success("¡Asistencia confirmada correctamente!")
+            st.rerun()
 
-    # ---------------- 2. ZONA DE PUBLICACIÓN ----------------
-    st.write("### 2. Estado de Votaciones y Publicar Oficialmente")
+    # ---------------- 2. ZONA DE PUBLICACIÓN (Mínimo 5 jugadores) ----------------
+    st.write("### 2. Estado de Votaciones y Publicar")
     if not df_v.empty:
         for idx, row in df_v.iterrows():
             fecha = str(row['Fecha'])
@@ -244,30 +265,33 @@ with tab_votar:
             st.write(f"#### 📅 {fecha}")
             st.write(f"🏃‍♂️ **Apuntados ({len(jugadores_actuales)}):** {', '.join(jugadores_actuales) if jugadores_actuales else 'Nadie'}")
             
-            with st.expander(f"🚀 Publicar oficialmente este partido"):
-                df_c = load_sheet_data("Campos")
-                if not df_c.empty:
-                    # Extraer la fecha limpia para la publicación final
-                    fecha_limpia = fecha.split(" ")[0] if " " in fecha else fecha
-                    
-                    hora_encuentro = st.time_input("Hora de encuentro confirmada", key=f"hora_{fecha}")
-                    campo_seleccionado = st.selectbox("Seleccionar Campo", df_c['name'].tolist(), key=f"campo_{fecha}")
-                    
-                    if st.button("Confirmar Partido", key=f"pub_{fecha}", type="primary"):
-                        dt_str = f"{fecha_limpia} {hora_encuentro.strftime('%H:%M')}"
-                        df_e = load_sheet_data("Eventos")
+            # Condición de 5 jugadores
+            if len(jugadores_actuales) >= 5:
+                with st.expander(f"🚀 Publicar oficialmente (Mínimo alcanzado)"):
+                    df_c = load_sheet_data("Campos")
+                    if not df_c.empty:
+                        fecha_limpia = fecha.split(" ")[0] if " " in fecha else fecha
+                        hora_encuentro = st.time_input("Hora confirmada", key=f"hora_{fecha}")
+                        campo_seleccionado = st.selectbox("Seleccionar Campo", df_c['name'].tolist(), key=f"campo_{fecha}")
                         
-                        new_row = pd.DataFrame([{"datetime": dt_str, "venue": campo_seleccionado, "players": ",".join(jugadores_actuales)}])
-                        df_e = pd.concat([df_e, new_row], ignore_index=True)
-                        save_sheet_data("Eventos", df_e)
-                        
-                        df_v = df_v.drop(idx).reset_index(drop=True)
-                        save_sheet_data("Votaciones", df_v)
-                        
-                        st.success("¡Partido confirmado! Aparecerá en Inicio.")
-                        st.rerun()
-                else:
-                    st.warning("No hay campos. Añade uno en la pestaña 'Campos'.")
+                        if st.button("Confirmar Partido", key=f"pub_{fecha}", type="primary"):
+                            dt_str = f"{fecha_limpia} {hora_encuentro.strftime('%H:%M')}"
+                            df_e = load_sheet_data("Eventos")
+                            
+                            new_row = pd.DataFrame([{"datetime": dt_str, "venue": campo_seleccionado, "players": ",".join(jugadores_actuales)}])
+                            df_e = pd.concat([df_e, new_row], ignore_index=True)
+                            save_sheet_data("Eventos", df_e)
+                            
+                            df_v = df_v.drop(idx).reset_index(drop=True)
+                            save_sheet_data("Votaciones", df_v)
+                            
+                            st.success("¡Partido confirmado! Aparecerá en Inicio.")
+                            st.rerun()
+                    else:
+                        st.warning("No hay campos. Añade uno en la pestaña 'Campos'.")
+            else:
+                st.info(f"⏳ Faltan {5 - len(jugadores_actuales)} jugadores para poder publicar (Mínimo 5).")
+                
             st.write("---")
     else:
         st.info("Todavía no hay nadie apuntado a ningún partido.")
