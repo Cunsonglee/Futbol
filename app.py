@@ -67,8 +67,7 @@ def _gh_put_file(filename, csv_content, sha, commit_msg):
 
 def _parse_csv(raw_text, worksheet_name):
     """把 CSV 文本解析成 DataFrame"""
-    sep = ";" if ";" in raw_text.split("
-")[0] else ","
+    sep = ";" if ";" in raw_text.splitlines()[0] else ","
     df  = pd.read_csv(io.StringIO(raw_text), dtype=str, sep=sep)
     df.columns = [c.strip() for c in df.columns]
     df = df.dropna(how="all").reset_index(drop=True)
