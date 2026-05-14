@@ -265,82 +265,55 @@ with tab_votar:
                 votos_actuales[f_key] = jugs
 
     # ══════════════════════════════════════════════════════
-    # SECCIÓN 1: Calendario — lista vertical (mobile-friendly)
+    # SECCIÓN 1: Calendario
     # ══════════════════════════════════════════════════════
     st.markdown("**📅 Selecciona fecha y franja horaria:**")
     slots_by_date, start_of_week = get_calendar_slots_grouped()
     selected_slots = []
 
-    st.markdown("""
-    <style>
-    .dia-row {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 6px 10px;
-        border-radius: 8px;
-        margin-bottom: 4px;
-        background: rgba(255,255,255,0.04);
-    }
-    .dia-label {
-        min-width: 90px;
-        font-size: 0.82rem;
-        font-weight: 700;
-        color: #1a73e8;
-        white-space: nowrap;
-    }
-    .dia-sep {
-        border: none;
-        border-top: 1px solid rgba(128,128,128,0.2);
-        margin: 8px 0 4px 0;
-    }
-    .semana-label {
-        font-size: 0.7rem;
-        font-weight: 600;
-        color: #888;
-        letter-spacing: 0.05em;
-        margin: 10px 0 2px 0;
-        text-transform: uppercase;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
     dias_es = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
     curr = start_of_week
+
     for w in range(6):
-        # Encabezado de semana
         lun = curr.strftime("%d/%m")
         dom = (curr + timedelta(days=6)).strftime("%d/%m")
-        st.markdown(f'<div class="semana-label">Semana {lun} – {dom}</div>', unsafe_allow_html=True)
 
-        hay_slots_semana = False
+        # Recopilar días con slots esta semana
+        semana_slots = []
+        tmp = curr
         for i in range(7):
-            d_str  = curr.strftime("%Y-%m-%d")
-            nombre = dias_es[i]
-            fecha  = curr.strftime("%d/%m")
+            d_str = tmp.strftime("%Y-%m-%d")
             if d_str in slots_by_date:
-                hay_slots_semana = True
-                franjas = slots_by_date[d_str]
-                # Una fila por día con checkboxes en columnas a la derecha
-                col_lbl, *col_franjas = st.columns([2] + [1]*len(franjas))
+                semana_slots.append((dias_es[i], tmp.strftime("%d/%m"), d_str, slots_by_date[d_str]))
+            tmp += timedelta(days=1)
+
+        if semana_slots:
+            st.markdown(
+                f'<div style="font-size:0.7rem;font-weight:600;color:#888;'
+                f'text-transform:uppercase;letter-spacing:0.05em;'
+                f'margin:12px 0 2px 0;">Semana {lun} – {dom}</div>',
+                unsafe_allow_html=True
+            )
+            for nombre, fecha, d_str, franjas in semana_slots:
+                # Columnas fijas: fecha | franja1 | franja2
+                # ratio 1.2:1:1 — funciona bien en móvil y escritorio
+                col_lbl, col_f1, col_f2 = st.columns([1.2, 1, 1])
                 col_lbl.markdown(
-                    f'<div style="padding-top:6px;font-size:0.82rem;font-weight:700;color:#1a73e8;">'
-                    f'{nombre} {fecha}</div>',
+                    f'<div style="padding-top:8px;font-size:0.85rem;'
+                    f'font-weight:700;color:#1a73e8;white-space:nowrap;">⏰ {nombre} {fecha}</div>',
                     unsafe_allow_html=True
                 )
-                for j, franja in enumerate(franjas):
+                for j, franja in enumerate(franjas[:2]):
                     s_val  = f"{d_str} ({franja})"
                     n_vots = len(votos_actuales.get(s_val, []))
                     icon   = "🌅" if franja == "Mañana" else "🌆"
-                    label  = f"{icon} {franja[:3]}\n({n_vots}✓)"
-                    with col_franjas[j]:
+                    label  = f"{icon} {franja} ({n_vots}✓)"
+                    col = col_f1 if j == 0 else col_f2
+                    with col:
                         if st.checkbox(label, key=f"chk_{s_val}"):
                             selected_slots.append(s_val)
-            curr += timedelta(days=1)
 
-        if not hay_slots_semana:
-            st.markdown('<div style="font-size:0.75rem;color:#aaa;padding:2px 0 6px 0;">Sin disponibilidad esta semana</div>', unsafe_allow_html=True)
-
+        curr += timedelta(days=7)
     st.divider()
 
     # ══════════════════════════════════════════════════════
