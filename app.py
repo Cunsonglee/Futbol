@@ -6,7 +6,8 @@ import requests
 from bs4 import BeautifulSoup
 import urllib.parse
 import pytz
-import os
+import io
+import base64
 
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
@@ -14,7 +15,11 @@ from google.oauth2 import service_account
 # ================= 1. CONFIGURACIÓN BÁSICA =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="wide")
 
-# ── Rutas a los CSV locales ──────────────────────────────
+# ── GitHub 配置 ──────────────────────────────────────────
+GITHUB_TOKEN  = st.secrets["github"]["token"]
+GITHUB_REPO   = st.secrets["github"]["repo"]    # "usuario/repo"
+GITHUB_BRANCH = st.secrets["github"].get("branch", "main")
+
 CSV_FILES = {
     "Campos":     "Campos.csv",
     "Eventos":    "Eventos.csv",
@@ -22,7 +27,6 @@ CSV_FILES = {
     "Votaciones": "Votaciones.csv",
 }
 
-# Columnas por defecto para cada hoja (si el CSV no existe aún)
 CSV_DEFAULTS = {
     "Campos":     ["name", "map_url", "is_free", "price", "duration_num", "duration_unit"],
     "Eventos":    ["datetime", "venue", "players"],
@@ -30,54 +34,82 @@ CSV_DEFAULTS = {
     "Votaciones": ["Fecha", "Jugadores"],
 }
 
-# ── Leer / Guardar CSV ───────────────────────────────────
+GH_API = "https://api.github.com"
+GH_HEADERS = {
+    "Authorization": f"Bearer {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+}
+
+def _gh_get_file(filename):
+    """获取 GitHub 上文件的内容和 SHA（用于后续更新）"""
+    url = f"{GH_API}/repos/{GITHUB_REPO}/contents/{filename}?ref={GITHUB_BRANCH}"
+    r = requests.get(url, headers=GH_HEADERS, timeout=15)
+    if r.status_code == 404:
+        return None, None   # 文件不存在
+    r.raise_for_status()
+    data = r.json()
+    raw  = base64.b64decode(data["content"]).decode("utf-8-sig")
+    return raw, data["sha"]
+
+def _gh_put_file(filename, csv_content, sha, commit_msg):
+    """在 GitHub 上创建或更新文件"""
+    url  = f"{GH_API}/repos/{GITHUB_REPO}/contents/{filename}"
+    body = {
+        "message": commit_msg,
+        "content": base64.b64encode(csv_content.encode("utf-8")).decode("utf-8"),
+        "branch":  GITHUB_BRANCH,
+    }
+    if sha:
+        body["sha"] = sha   # 更新已有文件必须带 SHA
+    r = requests.put(url, headers=GH_HEADERS, json=body, timeout=15)
+    r.raise_for_status()
+
+def _parse_csv(raw_text, worksheet_name):
+    """把 CSV 文本解析成 DataFrame"""
+    sep = ";" if ";" in raw_text.split("
+")[0] else ","
+    df  = pd.read_csv(io.StringIO(raw_text), dtype=str, sep=sep)
+    df.columns = [c.strip() for c in df.columns]
+    df = df.dropna(how="all").reset_index(drop=True)
+    for col in CSV_DEFAULTS.get(worksheet_name, []):
+        if col not in df.columns:
+            df[col] = ""
+    return df
+
+# ── Leer desde GitHub ────────────────────────────────────
 def load_sheet_data(worksheet_name, ttl=None):
-    """
-    Lee el CSV local correspondiente.
-    El parámetro ttl se mantiene por compatibilidad pero no se usa.
-    """
-    path = CSV_FILES.get(worksheet_name)
-    if not path:
+    filename = CSV_FILES.get(worksheet_name)
+    if not filename:
         st.error(f"Hoja desconocida: {worksheet_name}")
         return pd.DataFrame()
-
-    if not os.path.exists(path):
-        # Crear CSV vacío con las columnas correctas
-        df = pd.DataFrame(columns=CSV_DEFAULTS.get(worksheet_name, []))
-        df.to_csv(path, index=False)
-        return df
-
     try:
-        # Detectar separador automáticamente (coma o punto y coma)
-        # y eliminar BOM si existe (encoding utf-8-sig)
-        with open(path, 'r', encoding='utf-8-sig') as f:
-            first_line = f.readline()
-        sep = ';' if ';' in first_line else ','
-        df = pd.read_csv(path, dtype=str, sep=sep, encoding='utf-8-sig')
-        # Limpiar nombres de columnas (quitar espacios accidentales)
-        df.columns = [c.strip() for c in df.columns]
-        df = df.dropna(how="all").reset_index(drop=True)
-        # Añadir columnas que falten según los defaults
-        for col in CSV_DEFAULTS.get(worksheet_name, []):
-            if col not in df.columns:
-                df[col] = ""
-        return df
+        raw, _ = _gh_get_file(filename)
+        if raw is None:
+            # Archivo no existe aún → devolver DataFrame vacío
+            return pd.DataFrame(columns=CSV_DEFAULTS.get(worksheet_name, []))
+        return _parse_csv(raw, worksheet_name)
     except Exception as e:
-        st.error(f"Error al leer {path}: {e}")
+        st.error(f"Error al leer {filename} desde GitHub: {e}")
         return pd.DataFrame(columns=CSV_DEFAULTS.get(worksheet_name, []))
 
-
+# ── Guardar en GitHub (commit automático) ────────────────
 def save_sheet_data(worksheet_name, df):
-    """Guarda el DataFrame en el CSV local correspondiente."""
-    path = CSV_FILES.get(worksheet_name)
-    if not path:
+    filename = CSV_FILES.get(worksheet_name)
+    if not filename:
         st.error(f"Hoja desconocida: {worksheet_name}")
         return
     try:
-        # Guardar siempre con coma como separador y sin BOM
-        df.to_csv(path, index=False, sep=',', encoding='utf-8')
+        _, sha = _gh_get_file(filename)   # necesitamos el SHA para actualizar
+        csv_text = df.to_csv(index=False)
+        _gh_put_file(
+            filename  = filename,
+            csv_content = csv_text,
+            sha       = sha,
+            commit_msg = f"app: actualizar {filename}"
+        )
     except Exception as e:
-        st.error(f"Error al guardar {path}: {e}")
+        st.error(f"Error al guardar {filename} en GitHub: {e}")
 
 
 # ================= 2. FUNCIONES AUXILIARES =================
