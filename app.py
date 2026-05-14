@@ -349,16 +349,32 @@ with tab_campos:
 
     st.write("### Campos Registrados")
     df_c = load_sheet_data("Campos")   # recargar tras posible guardado
-    if not df_c.empty and 'name' in df_c.columns and 'map_url' in df_c.columns:
+
+    # DEBUG temporal: ver columnas reales del CSV
+    if not df_c.empty:
+        st.caption(f"Columnas en Campos.csv: {list(df_c.columns)}")
+
+    if not df_c.empty:
+        # Mapeo flexible por si los nombres de columna difieren
+        col_map   = {c.lower().strip(): c for c in df_c.columns}
+        col_name  = col_map.get('name',         col_map.get('nombre',   None))
+        col_url   = col_map.get('map_url',      col_map.get('url',      col_map.get('enlace', None)))
+        col_free  = col_map.get('is_free',      col_map.get('gratis',   None))
+        col_price = col_map.get('price',        col_map.get('precio',   None))
+        col_num   = col_map.get('duration_num', col_map.get('cantidad', None))
+        col_unit  = col_map.get('duration_unit',col_map.get('unidad',   None))
+
         for i in range(len(df_c)):
             row = df_c.iloc[i]
             c1, c2 = st.columns([4, 1])
+            nombre  = str(row[col_name])  if col_name  else "Sin nombre"
+            map_url = str(row[col_url])   if col_url   else "#"
             precio_f = formatear_precio(
-                row.get('is_free', 0), row.get('price', 0),
-                row.get('duration_num', 1), row.get('duration_unit', 'hora')
+                row[col_free]  if col_free  else 0,
+                row[col_price] if col_price else 0,
+                row[col_num]   if col_num   else 1,
+                row[col_unit]  if col_unit  else "hora"
             )
-            nombre   = str(row.get('name', ''))
-            map_url  = str(row.get('map_url', ''))
             c1.markdown(f"🏟️ **[{nombre}]({map_url})** — {precio_f}")
             if c2.button("Eliminar", key=f"del_c_{i}"):
                 df_c_new = df_c.drop(index=i).reset_index(drop=True)
