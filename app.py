@@ -2,7 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
@@ -55,35 +55,51 @@ def formatear_precio(is_free, price, num, unit):
         return f"{float(price):.2f} € / {int(num)} {unit_str}"
     except: return "No especificado"
 
-# --- NUEVA FUNCIÓN: LEER GOOGLE CALENDAR ---
+# --- NUEVA FUNCIÓN: LEER GOOGLE CALENDAR (Próximas 6 semanas con franja horaria) ---
 def get_upcoming_calendar_slots():
-    """Lee los eventos futuros del Google Calendar usando las credenciales de GSheets"""
+    """Lee los eventos de las próximas 6 semanas y muestra la hora de inicio y fin"""
     try:
         SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
-        # Reutilizamos los secretos que ya tienes configurados para GSheets
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
         
         service = build('calendar', 'v3', credentials=creds)
         
         calendar_id = '07854ef03649a28b9507946bb4f7af183d0cf1f49535580916c12c2a4fd1933c@group.calendar.google.com'
-        now = datetime.utcnow().isoformat() + 'Z'
+        
+        # 设定时间范围：从"现在"到"未来6个星期 (6 weeks)"
+        now = datetime.utcnow()
+        time_max = now + timedelta(weeks=6)
         
         events_result = service.events().list(
-            calendarId=calendar_id, timeMin=now,
-            maxResults=15, singleEvents=True, orderBy='startTime').execute()
+            calendarId=calendar_id, 
+            timeMin=now.isoformat() + 'Z',
+            timeMax=time_max.isoformat() + 'Z',  # 限制在 6 个星期内
+            singleEvents=True, 
+            orderBy='startTime').execute()
+            
         events = events_result.get('items', [])
         
         formatted_slots = []
         for event in events:
-            start = event['start'].get('dateTime', event['start'].get('date'))
+            start_info = event.get('start', {})
+            end_info = event.get('end', {})
             summary = event.get('summary', 'Fútbol')
-            if 'T' in start:
-                dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                slot_name = f"{dt.strftime('%Y-%m-%d (%H:%M)')} | {summary}"
+            
+            # 判断是否有具体的时间段 (Franja horaria)
+            if 'dateTime' in start_info and 'dateTime' in end_info:
+                start_dt = datetime.fromisoformat(start_info['dateTime'].replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end_info['dateTime'].replace('Z', '+00:00'))
+                
+                # 格式化输出为: 2026-05-17 (07:00 - 13:00) | Fútbol
+                slot_name = f"{start_dt.strftime('%Y-%m-%d')} ({start_dt.strftime('%H:%M')} - {end_dt.strftime('%H:%M')}) | {summary}"
             else:
-                slot_name = f"{start} (Todo el día) | {summary}"
+                # Todo el día (全天活动)
+                date_str = start_info.get('date', '')
+                slot_name = f"{date_str} (Todo el día) | {summary}"
+                
             formatted_slots.append(slot_name)
+            
         return formatted_slots
     except Exception as e:
         st.error(f"No se pudo conectar al Calendario: {e}")
