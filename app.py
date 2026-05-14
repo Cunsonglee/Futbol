@@ -12,7 +12,7 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
 # ================= 1. CONFIGURACIÓN BÁSICA =================
-st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="wide") # Cambiado a 'wide' para que quepan las 7 columnas
+st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="wide")
 
 MAIN_URL = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -24,12 +24,21 @@ def load_sheet_data(worksheet_name):
         st.error(f"Error al cargar la pestaña {worksheet_name}: {e}")
         return pd.DataFrame()
 
+# 🔴 ¡REPARADO! Lógica de guardado a prueba de fallos
 def save_sheet_data(worksheet_name, df):
     try:
-        conn.create(spreadsheet=MAIN_URL, worksheet=worksheet_name, data=df)
-        st.cache_data.clear() 
-    except Exception as e:
-        st.error(f"Error al guardar en {worksheet_name}: {e}")
+        # 1. Limpiamos la caché primero
+        st.cache_data.clear()
+        # 2. Intentamos usar UPDATE (la forma correcta de sobrescribir una pestaña existente)
+        conn.update(worksheet=worksheet_name, data=df)
+    except Exception:
+        try:
+            # 3. Si update falla (porque no existe la pestaña), usamos CREATE
+            conn.create(spreadsheet=MAIN_URL, worksheet=worksheet_name, data=df)
+        except Exception as e:
+            st.error(f"Error crítico al guardar en {worksheet_name}: {e}")
+    finally:
+        st.cache_data.clear() # Aseguramos que la siguiente lectura sea 100% fresca
 
 # ================= 2. FUNCIONES AUXILIARES =================
 def fetch_venue_name(url):
@@ -54,9 +63,7 @@ def formatear_precio(is_free, price, num, unit):
         return f"{float(price):.2f} € / {int(num)} {unit_str}"
     except: return "No especificado"
 
-# --- NUEVA FUNCIÓN: LEER CALENDARIO AGRUPADO POR FECHAS ---
 def get_calendar_slots_grouped():
-    """Lee 6 semanas empezando desde el lunes actual, agrupa por fecha"""
     try:
         SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
         creds_info = st.secrets["connections"]["gsheets"]
@@ -66,7 +73,7 @@ def get_calendar_slots_grouped():
         
         tz = pytz.timezone('Europe/Madrid')
         today = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
-        start_of_week = today - timedelta(days=today.weekday()) # Lunes de esta semana
+        start_of_week = today - timedelta(days=today.weekday()) 
         time_max = start_of_week + timedelta(weeks=6)
         
         events_result = service.events().list(
@@ -179,7 +186,9 @@ with tab_votar:
     df_v = load_sheet_data("Votaciones")
     if df_v.empty:
         df_v = pd.DataFrame(columns=['Fecha', 'Jugadores'])
-    df_v['Fecha'] = df_v['Fecha'].astype(str) # Asegurar tipo string para evitar errores
+        
+    # 🔴 Aseguramos de limpiar bien los formatos para no tener errores de coincidencia
+    df_v['Fecha'] = df_v['Fecha'].astype(str).str.strip()
     
     df_m = load_sheet_data("Miembros")
     all_m = sorted(df_m['name'].tolist()) if not df_m.empty else []
@@ -192,34 +201,27 @@ with tab_votar:
         
     selected_slots = []
     
-    # Nombres de los días
     dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-    
-    # Dibujar Cabeceras
     cols_header = st.columns(7)
     for i in range(7):
         cols_header[i].markdown(f"<div style='text-align:center; font-weight:bold; background-color:#f0f2f6; padding:5px; border-radius:5px;'>{dias_semana[i]}</div>", unsafe_allow_html=True)
     
-    st.write("") # Espacio
+    st.write("") 
     
-    # Dibujar la malla de 6 semanas
     current_date = start_of_week
     for week in range(6):
         cols = st.columns(7)
         for i in range(7):
             date_str = current_date.strftime('%Y-%m-%d')
             with cols[i]:
-                # Mostrar el día (Ej: 14/05)
                 st.markdown(f"<div style='text-align:center; font-size:12px; color:#555;'>{current_date.strftime('%d/%m')}</div>", unsafe_allow_html=True)
                 
                 if date_str in slots_by_date:
                     for franja in slots_by_date[date_str]:
                         slot_val = f"{date_str} ({franja})"
-                        # Casilla de verificación
                         if st.checkbox(franja, key=f"chk_{slot_val}"):
                             selected_slots.append(slot_val)
                 else:
-                    # Si no hay eventos
                     st.markdown("<div style='text-align:center; font-size:14px; color:#aaa; margin-top:5px;'>NON</div>", unsafe_allow_html=True)
             current_date += timedelta(days=1)
         st.divider()
@@ -227,31 +229,37 @@ with tab_votar:
     st.write("**2. Selecciona los jugadores:**")
     selected_members = st.multiselect("Elige a los miembros (puedes buscar por nombre):", all_m)
     
+    # 🔴 ¡REPARADO! Lógica robusta del botón de confirmación
     if st.button("Confirmar Jugadores en Fechas Seleccionadas", type="primary"):
         if not selected_slots:
-            st.warning("⚠️ Debes marcar al menos una fecha en el calendario de arriba.")
+            st.error("⚠️ Error: Debes marcar al menos una fecha en el calendario de arriba.")
         elif not selected_members:
-            st.warning("⚠️ Debes seleccionar al menos un jugador de la lista desplegable.")
+            st.error("⚠️ Error: Debes seleccionar al menos un jugador de la lista desplegable.")
         else:
-            # Guardar la información corregida
+            # Lista de fechas existentes en la base de datos
+            fechas_existentes = df_v['Fecha'].tolist()
+            
             for slot in selected_slots:
-                if slot in df_v['Fecha'].values:
-                    # Si ya existe, añadir a los miembros sin duplicar
-                    idx = df_v.index[df_v['Fecha'] == slot][0]
+                slot_str = str(slot).strip()
+                
+                if slot_str in fechas_existentes:
+                    # Encontrar el índice de forma segura
+                    idx = df_v.index[df_v['Fecha'] == slot_str].tolist()[0]
                     current_jugadores = str(df_v.at[idx, 'Jugadores'])
                     lista_jugadores = [p.strip() for p in current_jugadores.split(",") if p.strip() and current_jugadores != "nan"]
                     
                     for m in selected_members:
                         if m not in lista_jugadores:
                             lista_jugadores.append(m)
+                            
                     df_v.at[idx, 'Jugadores'] = ",".join(lista_jugadores)
                 else:
-                    # Crear nueva fila
-                    nueva_fila = pd.DataFrame([{"Fecha": slot, "Jugadores": ",".join(selected_members)}])
+                    nueva_fila = pd.DataFrame([{"Fecha": slot_str, "Jugadores": ",".join(selected_members)}])
                     df_v = pd.concat([df_v, nueva_fila], ignore_index=True)
             
+            # Guardamos y forzamos el rerun
             save_sheet_data("Votaciones", df_v)
-            st.success("¡Asistencia confirmada correctamente!")
+            st.success("✅ ¡Jugadores añadidos con éxito! Actualizando la vista...")
             st.rerun()
 
     # ---------------- 2. ZONA DE PUBLICACIÓN (Mínimo 5 jugadores) ----------------
@@ -265,7 +273,6 @@ with tab_votar:
             st.write(f"#### 📅 {fecha}")
             st.write(f"🏃‍♂️ **Apuntados ({len(jugadores_actuales)}):** {', '.join(jugadores_actuales) if jugadores_actuales else 'Nadie'}")
             
-            # Condición de 5 jugadores
             if len(jugadores_actuales) >= 5:
                 with st.expander(f"🚀 Publicar oficialmente (Mínimo alcanzado)"):
                     df_c = load_sheet_data("Campos")
