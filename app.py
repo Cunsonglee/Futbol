@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
@@ -7,17 +8,17 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import pytz 
 
+# --- NUEVOS IMPORTS PARA GOOGLE CALENDAR API ---
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+
 # ================= 1. CONFIGURACIÓN BÁSICA =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="centered")
 
-# --- ⚠️ IMPORTANTE: Pon aquí el enlace de tu Google Sheet único ---
-
 MAIN_URL = "https://docs.google.com/spreadsheets/d/11mn_aczvx1l1Xxo8bmUjUHpJFRbX4dWyJDF1o5G_TK4/edit"
-
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_sheet_data(worksheet_name):
-    """Carga datos con caché de 5 min para mejorar la velocidad"""
     try:
         return conn.read(spreadsheet=MAIN_URL, worksheet=worksheet_name, ttl=300).dropna(how="all")
     except Exception as e:
@@ -25,7 +26,6 @@ def load_sheet_data(worksheet_name):
         return pd.DataFrame()
 
 def save_sheet_data(worksheet_name, df):
-    """Guarda datos y limpia la caché"""
     try:
         conn.create(spreadsheet=MAIN_URL, worksheet=worksheet_name, data=df)
         st.cache_data.clear() 
@@ -34,7 +34,6 @@ def save_sheet_data(worksheet_name, df):
 
 # ================= 2. FUNCIONES AUXILIARES =================
 def fetch_venue_name(url):
-    """Extrae el nombre del lugar desde Google Maps"""
     try:
         if "/place/" in url:
             part = url.split("/place/")[1].split("/")[0]
@@ -42,7 +41,7 @@ def fetch_venue_name(url):
             if name and "@" not in name: return name
     except: pass
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(response.text, 'html.parser')
         name = soup.title.string.replace(" - Google Maps", "").strip()
@@ -56,16 +55,50 @@ def formatear_precio(is_free, price, num, unit):
         return f"{float(price):.2f} € / {int(num)} {unit_str}"
     except: return "No especificado"
 
+# --- NUEVA FUNCIÓN: LEER GOOGLE CALENDAR ---
+def get_upcoming_calendar_slots():
+    """Lee los eventos futuros del Google Calendar usando las credenciales de GSheets"""
+    try:
+        SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+        # Reutilizamos los secretos que ya tienes configurados para GSheets
+        creds_info = st.secrets["connections"]["gsheets"]
+        creds = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+        
+        service = build('calendar', 'v3', credentials=creds)
+        
+        calendar_id = '07854ef03649a28b9507946bb4f7af183d0cf1f49535580916c12c2a4fd1933c@group.calendar.google.com'
+        now = datetime.utcnow().isoformat() + 'Z'
+        
+        events_result = service.events().list(
+            calendarId=calendar_id, timeMin=now,
+            maxResults=15, singleEvents=True, orderBy='startTime').execute()
+        events = events_result.get('items', [])
+        
+        formatted_slots = []
+        for event in events:
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            summary = event.get('summary', 'Fútbol')
+            if 'T' in start:
+                dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+                slot_name = f"{dt.strftime('%Y-%m-%d (%H:%M)')} | {summary}"
+            else:
+                slot_name = f"{start} (Todo el día) | {summary}"
+            formatted_slots.append(slot_name)
+        return formatted_slots
+    except Exception as e:
+        st.error(f"No se pudo conectar al Calendario: {e}")
+        return []
+
 # ================= 3. DISEÑO DE INTERFAZ (TABS) =================
 st.title("⚽ Gestión del Club")
 
-tab_inicio, tab_publicar, tab_campos, tab_miembros, tab_historial = st.tabs([
-    "🏠 Inicio", "📅 Publicar", "🥅 Campos", "🤼‍♂️ Miembros", "⏳ Historial"
+tab_inicio, tab_votar, tab_calendario, tab_campos, tab_miembros, tab_historial = st.tabs([
+    "🏠 Inicio", "🗳️ Votar", "📅 Calendario", "🥅 Campos", "🤼‍♂️ Miembros", "⏳ Historial"
 ])
 
 # --- TAB: 🏠 Inicio ---
 with tab_inicio:
-    st.subheader("Próximo Partido")
+    st.subheader("Próximo Partido Confirmado")
     df_e = load_sheet_data("Eventos")
     df_m = load_sheet_data("Miembros")
     df_c = load_sheet_data("Campos")
@@ -73,7 +106,6 @@ with tab_inicio:
     if not df_e.empty and 'datetime' in df_e.columns:
         tz = pytz.timezone('Europe/Madrid') 
         now = datetime.now(tz).strftime('%Y-%m-%d %H:%M')
-
         df_e['datetime'] = df_e['datetime'].astype(str)
         future_events = df_e[df_e['datetime'] >= now].sort_values("datetime")
 
@@ -88,18 +120,15 @@ with tab_inicio:
                 precio = formatear_precio(v.get('is_free',0), v.get('price',0), v.get('duration_num',1), v.get('duration_unit','hora'))
                 map_link = v.get('map_url', '#')
 
-            st.info(f"**⏰ Fecha:** {event['datetime']}\n\n**🏟️ Campo:** [{event['venue']}]({map_link})\n\n**💰 Precio:** {precio}")
-
+            st.info(f"**⏰ Fecha y Hora:** {event['datetime']}\n\n**🏟️ Campo:** [{event['venue']}]({map_link})\n\n**💰 Precio:** {precio}")
 
             players_str = str(event.get('players', ""))
             current_players = [p.strip() for p in players_str.split(",") if p.strip() and players_str != "nan"]
-
-
             all_m = sorted(df_m['name'].tolist()) if not df_m.empty else []
             available = [m for m in all_m if m not in current_players]
 
             st.write("---")
-            st.subheader("🙋‍♂️ Inscripción")
+            st.subheader("🙋‍♂️ Inscripción de Última Hora")
             sel = st.selectbox("Selecciona tu nombre para inscribirte:", ["-- Seleccionar --"] + available)
             if st.button("Confirmar Inscripción", type="primary"):
                 if sel != "-- Seleccionar --":
@@ -120,27 +149,102 @@ with tab_inicio:
                     save_sheet_data("Eventos", df_e)
                     st.rerun()
         else:
-            st.info("No hay partidos programados próximamente.")
+            st.info("No hay partidos programados próximamente. ¡Ve a la pestaña 'Votar'!")
 
-# --- TAB: 📅 Publicar ---
-with tab_publicar:
-    st.subheader("Programar Nuevo Partido")
-    df_c = load_sheet_data("Campos")
-    if df_c.empty:
-        st.warning("Por favor, añade primero un campo en la pestaña 'Campos'.")
+# --- TAB: 🗳️ Votar (NUEVO: Integrado con Google Calendar) ---
+with tab_votar:
+    st.subheader("Votar y Organizar Próximos Partidos")
+    
+    df_v = load_sheet_data("Votaciones")
+    if df_v.empty or 'Fecha' not in df_v.columns:
+        df_v = pd.DataFrame(columns=['Fecha', 'Jugadores'])
+
+    df_m = load_sheet_data("Miembros")
+    all_m = sorted(df_m['name'].tolist()) if not df_m.empty else []
+
+    # 1. Proponer fecha desde Google Calendar
+    with st.expander("➕ Abrir inscripción desde el Calendario"):
+        with st.spinner("Sincronizando con Google Calendar..."):
+            calendar_slots = get_upcoming_calendar_slots()
+        
+        if calendar_slots:
+            selected_slot = st.selectbox("Selecciona un horario de tu calendario:", calendar_slots)
+            if st.button("Abrir Votación para esta fecha"):
+                if selected_slot not in df_v['Fecha'].astype(str).values:
+                    nueva_fila = pd.DataFrame([{"Fecha": selected_slot, "Jugadores": ""}])
+                    df_v = pd.concat([df_v, nueva_fila], ignore_index=True)
+                    save_sheet_data("Votaciones", df_v)
+                    st.success(f"Inscripción abierta para: {selected_slot}")
+                    st.rerun()
+                else:
+                    st.warning("Esta fecha ya está abierta para votación.")
+        else:
+            st.write("No se encontraron eventos futuros en el calendario.")
+
+    st.divider()
+
+    # 2. Mostrar fechas abiertas para apuntarse
+    if not df_v.empty:
+        for idx, row in df_v.iterrows():
+            fecha = str(row['Fecha'])
+            jugadores_str = str(row['Jugadores'])
+            jugadores_actuales = [p.strip() for p in jugadores_str.split(",") if p.strip() and jugadores_str != "nan"]
+            
+            st.write(f"### 📅 {fecha}")
+            st.write(f"🏃‍♂️ **Apuntados ({len(jugadores_actuales)}):** {', '.join(jugadores_actuales) if jugadores_actuales else 'Nadie todavía'}")
+            
+            # Anotarse
+            disponibles = [m for m in all_m if m not in jugadores_actuales]
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                sel = st.selectbox(f"Anotarme:", ["-- Seleccionar --"] + disponibles, key=f"sel_v_{fecha}")
+            with c2:
+                st.write("") 
+                st.write("")
+                if st.button("Anotarme", key=f"btn_v_{fecha}"):
+                    if sel != "-- Seleccionar --":
+                        jugadores_actuales.append(sel)
+                        df_v.at[idx, 'Jugadores'] = ",".join(jugadores_actuales)
+                        save_sheet_data("Votaciones", df_v)
+                        st.success(f"¡{sel} anotado!")
+                        st.rerun()
+            
+            # Publicar Oficialmente
+            with st.expander(f"🚀 Publicar oficialmente este partido"):
+                df_c = load_sheet_data("Campos")
+                if not df_c.empty:
+                    # Extraer solo la fecha principal (Ej: "2026-05-17") de la cadena del calendario
+                    fecha_limpia = fecha.split(" ")[0] if " " in fecha else fecha
+                    
+                    hora_encuentro = st.time_input("Hora de encuentro confirmada", key=f"hora_{fecha}")
+                    campo_seleccionado = st.selectbox("Seleccionar Campo", df_c['name'].tolist(), key=f"campo_{fecha}")
+                    
+                    if st.button("Confirmar Partido", key=f"pub_{fecha}", type="primary"):
+                        dt_str = f"{fecha_limpia} {hora_encuentro.strftime('%H:%M')}"
+                        df_e = load_sheet_data("Eventos")
+                        
+                        # Guardar en Eventos
+                        new_row = pd.DataFrame([{"datetime": dt_str, "venue": campo_seleccionado, "players": ",".join(jugadores_actuales)}])
+                        df_e = pd.concat([df_e, new_row], ignore_index=True)
+                        save_sheet_data("Eventos", df_e)
+                        
+                        # Borrar de Votaciones
+                        df_v = df_v.drop(idx).reset_index(drop=True)
+                        save_sheet_data("Votaciones", df_v)
+                        
+                        st.success("¡Partido confirmado! Aparecerá en Inicio.")
+                        st.rerun()
+                else:
+                    st.warning("No hay campos. Añade uno en la pestaña 'Campos'.")
+            st.divider()
     else:
-        with st.form("pub_form"):
-            d = st.date_input("Fecha")
-            t = st.time_input("Hora")
-            venue = st.selectbox("Seleccionar Campo", df_c['name'].tolist())
-            if st.form_submit_button("Publicar Partido"):
-                dt_str = f"{d.strftime('%Y-%m-%d')} {t.strftime('%H:%M')}"
-                df_e = load_sheet_data("Eventos")
-                new_row = pd.DataFrame([{"datetime": dt_str, "venue": venue, "players": ""}])
-                df_e = pd.concat([df_e, new_row], ignore_index=True)
-                save_sheet_data("Eventos", df_e)
-                st.success("¡Partido publicado con éxito!")
-                st.rerun()
+        st.info("No hay inscripciones abiertas. ¡Abre una desde el calendario arriba!")
+
+# --- TAB: 📅 Calendario ---
+with tab_calendario:
+    st.subheader("Calendario General de Partidos")
+    calendar_url = "https://calendar.google.com/calendar/embed?src=07854ef03649a28b9507946bb4f7af183d0cf1f49535580916c12c2a4fd1933c%40group.calendar.google.com&ctz=Europe%2FMadrid"
+    components.iframe(calendar_url, height=600, scrolling=True)
 
 # --- TAB: 🥅 Campos ---
 with tab_campos:
