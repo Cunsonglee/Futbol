@@ -236,20 +236,47 @@ with tab_inicio:
 # TAB: 🗳️ Votar
 # ─────────────────────────────────────────────────────────
 with tab_votar:
-    st.subheader("🗳️ Panel de Votación y Registro")
+    st.subheader("🗳️ Votación y Registro")
 
     df_v = load_sheet_data("Votaciones")
     df_m = load_sheet_data("Miembros")
     all_m = sorted(df_m['name'].tolist()) if not df_m.empty and 'name' in df_m.columns else []
 
-    st.write("### 1. Seleccionar Fechas (Malla Lunes-Domingo)")
+    # ── Construir diccionario rápido de votos actuales para mostrar contador ──
+    votos_actuales = {}
+    if not df_v.empty and 'Fecha' in df_v.columns:
+        for _, vrow in df_v.iterrows():
+            f_key = str(vrow.get('Fecha', ''))
+            j_str = str(vrow.get('Jugadores', ''))
+            jugs  = [p.strip() for p in j_str.split(",") if p.strip() and j_str != "nan"]
+            if f_key:
+                votos_actuales[f_key] = jugs
+
+    # ══════════════════════════════════════════════════════
+    # SECCIÓN 1: Calendario compacto
+    # ══════════════════════════════════════════════════════
+    st.markdown("**📅 Selecciona fecha y franja horaria:**")
     slots_by_date, start_of_week = get_calendar_slots_grouped()
     selected_slots = []
 
-    dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    # CSS para hacer las celdas más compactas y con aspecto de calendario
+    st.markdown("""
+    <style>
+    div[data-testid="stHorizontalBlock"] > div { padding: 0 2px !important; }
+    .cal-header { text-align:center; font-size:0.72rem; font-weight:700;
+                  color:#555; padding:3px 0; border-bottom:2px solid #4CAF50; margin-bottom:4px; }
+    .cal-day    { text-align:center; font-size:0.75rem; font-weight:600; color:#1a73e8; margin-bottom:2px; }
+    .cal-empty  { text-align:center; font-size:0.65rem; color:#ccc; padding:6px 0; }
+    .vote-badge { display:inline-block; background:#e8f5e9; color:#2e7d32;
+                  border-radius:10px; padding:1px 7px; font-size:0.7rem; font-weight:600; margin-left:4px; }
+    .vote-badge-warn { background:#fff3e0; color:#e65100; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    dias_cortos = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
     cols_h = st.columns(7)
-    for i, d in enumerate(dias):
-        cols_h[i].markdown(f"**{d}**")
+    for i, d in enumerate(dias_cortos):
+        cols_h[i].markdown(f'<div class="cal-header">{d}</div>', unsafe_allow_html=True)
 
     curr = start_of_week
     for w in range(6):
@@ -257,27 +284,38 @@ with tab_votar:
         for i in range(7):
             d_str = curr.strftime('%Y-%m-%d')
             with cols[i]:
-                st.caption(curr.strftime('%d/%m'))
+                st.markdown(f'<div class="cal-day">{curr.strftime("%d/%m")}</div>', unsafe_allow_html=True)
                 if d_str in slots_by_date:
-                    for f in slots_by_date[d_str]:
-                        s_val = f"{d_str} ({f})"
-                        if st.checkbox(f, key=f"chk_{s_val}"):
+                    for franja in slots_by_date[d_str]:
+                        s_val  = f"{d_str} ({franja})"
+                        n_vots = len(votos_actuales.get(s_val, []))
+                        # Etiqueta compacta con contador de votos actuales
+                        label  = f"{'🌅' if franja=='Mañana' else '🌆'} {franja[:3]} ({n_vots}✓)"
+                        if st.checkbox(label, key=f"chk_{s_val}"):
                             selected_slots.append(s_val)
                 else:
-                    st.write("NON")
+                    st.markdown('<div class="cal-empty">—</div>', unsafe_allow_html=True)
             curr += timedelta(days=1)
-        st.write("---")
 
-    st.write("### 2. Seleccionar Miembros")
-    sel_members = st.multiselect("Elige a los miembros que asistirán:", all_m)
+    st.divider()
 
-    if st.button("Confirmar Jugadores", type="primary"):
+    # ══════════════════════════════════════════════════════
+    # SECCIÓN 2: Selección de miembros + confirmar
+    # ══════════════════════════════════════════════════════
+    col_sel, col_btn = st.columns([4, 1])
+    with col_sel:
+        sel_members = st.multiselect("👥 Miembros que asistirán:", all_m, label_visibility="collapsed",
+                                     placeholder="Elige miembros...")
+    with col_btn:
+        confirmar = st.button("✅ Confirmar", type="primary", use_container_width=True)
+
+    if confirmar:
         if not selected_slots:
             st.warning("⚠️ Selecciona al menos una fecha.")
         elif not sel_members:
             st.warning("⚠️ Selecciona al menos un miembro.")
         else:
-            with st.spinner("Guardando votos..."):
+            with st.spinner("Guardando..."):
                 df_v_fresh = load_sheet_data("Votaciones")
                 for s in selected_slots:
                     s = str(s).strip()
@@ -293,48 +331,67 @@ with tab_votar:
                     else:
                         new_row = pd.DataFrame([{"Fecha": s, "Jugadores": ",".join(sel_members)}])
                         df_v_fresh = pd.concat([df_v_fresh, new_row], ignore_index=True)
-
                 save_sheet_data("Votaciones", df_v_fresh)
                 st.success("✅ ¡Votos guardados!")
                 st.rerun()
 
     st.divider()
-    st.write("### 3. Estado de Votaciones y Publicación")
+
+    # ══════════════════════════════════════════════════════
+    # SECCIÓN 3: Estado de votaciones — tarjetas compactas
+    # ══════════════════════════════════════════════════════
+    st.markdown("**📊 Estado de votaciones:**")
 
     df_v = load_sheet_data("Votaciones")
     if not df_v.empty and 'Fecha' in df_v.columns:
+        df_c = load_sheet_data("Campos")
+        campo_opts = df_c['name'].tolist() if not df_c.empty and 'name' in df_c.columns else ["No hay campos"]
+
         for i in range(len(df_v)):
-            row = df_v.iloc[i]
-            f     = str(row.get('Fecha', ''))
-            j_str = str(row.get('Jugadores', ''))
+            row      = df_v.iloc[i]
+            f        = str(row.get('Fecha', ''))
+            j_str    = str(row.get('Jugadores', ''))
             jugadores = [p.strip() for p in j_str.split(",") if p.strip() and j_str != "nan"]
+            if not jugadores:
+                continue
 
-            if jugadores:
-                with st.container():
-                    c1, c2 = st.columns([3, 1])
-                    c1.markdown(f"📅 **{f}**")
-                    c2.write(f"🏃‍♂️ **{len(jugadores)}**")
-                    st.write(f"👥 {', '.join(jugadores)}")
+            n      = len(jugadores)
+            falta  = max(0, 5 - n)
+            color  = "#e8f5e9" if n >= 5 else "#fff8e1"
+            border = "#4CAF50" if n >= 5 else "#FFB300"
+            barra  = min(n / 5, 1.0)
 
-                    if len(jugadores) >= 5:
-                        with st.expander("🚀 Publicar Partido (Mínimo 5 alcanzado)"):
-                            df_c = load_sheet_data("Campos")
-                            h = st.time_input("Hora", key=f"h_{f}")
-                            campo_opts = df_c['name'].tolist() if not df_c.empty and 'name' in df_c.columns else ["No hay campos"]
-                            campo = st.selectbox("Campo", campo_opts, key=f"c_{f}")
-                            if st.button("Confirmar y Publicar", key=f"p_{f}", type="primary"):
-                                dt = f"{f.split(' ')[0]} {h.strftime('%H:%M')}"
-                                df_e_cur = load_sheet_data("Eventos")
-                                new_e = pd.DataFrame([{"datetime": dt, "venue": campo, "players": ",".join(jugadores)}])
-                                save_sheet_data("Eventos", pd.concat([df_e_cur, new_e], ignore_index=True))
-                                # Eliminar votación publicada
-                                df_v_upd = load_sheet_data("Votaciones")
-                                df_v_upd = df_v_upd[df_v_upd['Fecha'].astype(str) != f]
-                                save_sheet_data("Votaciones", df_v_upd)
-                                st.rerun()
-                    else:
-                        st.info(f"⏳ Faltan {5 - len(jugadores)} para poder publicar.")
-                    st.write("---")
+            # Tarjeta con barra de progreso visual
+            st.markdown(f"""
+            <div style="border-left:4px solid {border}; background:{color};
+                        border-radius:6px; padding:8px 12px; margin-bottom:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:700; font-size:0.85rem;">📅 {f}</span>
+                    <span style="font-size:0.8rem; font-weight:600; color:{border};">
+                        {n}/5 jugadores{"  🟢 Listo!" if n >= 5 else f"  ⏳ faltan {falta}"}
+                    </span>
+                </div>
+                <div style="background:#ddd; border-radius:4px; height:5px; margin:5px 0;">
+                    <div style="background:{border}; width:{int(barra*100)}%; height:5px; border-radius:4px;"></div>
+                </div>
+                <div style="font-size:0.75rem; color:#555;">👥 {', '.join(jugadores)}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Botón publicar — solo visible si hay 5+
+            if n >= 5:
+                with st.expander("🚀 Publicar partido", expanded=False):
+                    hc = st.time_input("Hora del partido", key=f"h_{f}")
+                    campo = st.selectbox("Campo", campo_opts, key=f"c_{f}")
+                    if st.button("Confirmar y Publicar", key=f"p_{f}", type="primary"):
+                        dt = f"{f.split(' ')[0]} {hc.strftime('%H:%M')}"
+                        df_e_cur = load_sheet_data("Eventos")
+                        new_e = pd.DataFrame([{"datetime": dt, "venue": campo, "players": ",".join(jugadores)}])
+                        save_sheet_data("Eventos", pd.concat([df_e_cur, new_e], ignore_index=True))
+                        df_v_upd = load_sheet_data("Votaciones")
+                        df_v_upd = df_v_upd[df_v_upd['Fecha'].astype(str) != f]
+                        save_sheet_data("Votaciones", df_v_upd)
+                        st.rerun()
     else:
         st.info("No hay votos registrados actualmente.")
 
