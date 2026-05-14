@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
-# ================= 1. 初始化设置 =================
+# ================= 1. CONFIGURACIÓN BÁSICA =================
 st.set_page_config(page_title="Club de Fútbol", page_icon="⚽", layout="wide")
 
 # 从 Secrets 获取 GitHub 配置
@@ -18,18 +18,16 @@ GITHUB_TOKEN = st.secrets["github"]["token"]
 REPO = st.secrets["github"]["repo"]
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"}
 
-# ================= 2. GITHUB 数据读写逻辑 =================
+# ================= 2. GITHUB 数据读写逻辑 (替换原有 GSheets) =================
 
-def load_github_data(file_name, ttl=5):
+def load_github_data(file_name):
     """
-    从 GitHub 根目录读取 CSV 文件。
-    注意：文件名必须与 GitHub 上的完全一致（包括空格和大小写）。
+    从 GitHub 根目录读取 CSV 文件
     """
     path = f"{file_name}.csv"
     url = f"https://api.github.com/repos/{REPO}/contents/{path}"
-    
     try:
-        # 增加随机参数防止 GitHub API 缓存旧数据
+        # 增加时间戳参数防止 API 缓存旧数据
         response = requests.get(f"{url}?t={datetime.now().timestamp()}", headers=HEADERS)
         if response.status_code == 200:
             content_json = response.json()
@@ -37,21 +35,29 @@ def load_github_data(file_name, ttl=5):
             df = pd.read_csv(StringIO(csv_text))
             return df.dropna(how="all"), content_json['sha']
         else:
-            st.warning(f"Archivo {path} no encontrado, se creará uno nuevo al guardar.")
-            return pd.DataFrame(), None
+            # 如果文件不存在，初始化一个空的 DataFrame
+            cols = {
+                "Miembros": ["name"],
+                "Campos": ["name", "map_url", "is_free", "price", "duration_num", "duration_unit"],
+                "Votaciones": ["Fecha", "Jugadores"],
+                "Eventos": ["datetime", "venue", "players"]
+            }
+            return pd.DataFrame(columns=cols.get(file_name, [])), None
     except Exception as e:
-        st.error(f"Error al cargar {file_name}: {e}")
+        st.error(f"Error al cargar {file_name} desde GitHub: {e}")
         return pd.DataFrame(), None
 
 def save_github_data(file_name, df, message="Actualización de datos"):
-    """将 DataFrame 保存回 GitHub 根目录"""
+    """
+    将 DataFrame 保存到 GitHub 根目录
+    """
     path = f"{file_name}.csv"
     url = f"https://api.github.com/repos/{REPO}/contents/{path}"
     
-    # 1. 获取当前的 SHA
+    # 1. 获取最新的 SHA
     _, sha = load_github_data(file_name)
     
-    # 2. 准备数据
+    # 2. 准备内容
     csv_content = df.to_csv(index=False)
     encoded_content = base64.b64encode(csv_content.encode('utf-8')).decode('utf-8')
     
@@ -68,20 +74,18 @@ def save_github_data(file_name, df, message="Actualización de datos"):
         st.cache_data.clear()
         return True
     else:
-        st.error(f"Error al guardar en GitHub: {response.text}")
+        st.error(f"Error al guardar {file_name}: {response.text}")
         return False
 
-# ================= 3. GOOGLE CALENDAR 逻辑 (保留) =================
+# ================= 3. GOOGLE CALENDAR (保留原有逻辑) =================
 
 def get_calendar_slots_grouped():
     try:
         SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
-        # 使用 Secrets 里的 connections.gsheets 信息作为 Service Account 凭据
         creds_info = st.secrets["connections"]["gsheets"]
         creds = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
         service = build('calendar', 'v3', credentials=creds)
         
-        # 你的日历 ID
         calendar_id = '07854ef03649a28b9507946bb4f7af183d0cf1f49535580916c12c2a4fd1933c@group.calendar.google.com'
         
         tz = pytz.timezone('Europe/Madrid')
@@ -103,74 +107,102 @@ def get_calendar_slots_grouped():
             dt = datetime.fromisoformat(start_str.replace('Z', '+00:00')).astimezone(tz)
             date_str = dt.strftime('%Y-%m-%d')
             time_str = dt.strftime('%H:%M')
-            if date_str not in slots_by_date: slots_by_date[date_str] = []
+            if date_str not in slots_by_date:
+                slots_by_date[date_str] = []
             slots_by_date[date_str].append(time_str)
         return slots_by_date, start_of_week
     except Exception as e:
-        st.error(f"Error al conectar con Google Calendar: {e}")
+        st.error(f"Error al conectar con el calendario: {e}")
         return {}, datetime.now()
 
-# ================= 4. UI 界面逻辑 =================
+# ================= 4. FUNCIONES AUXILIARES (保留原有逻辑) =================
 
-tab_main, tab_votaciones, tab_campos, tab_miembros = st.tabs([
-    "🏠 Inicio", "🗳️ Votaciones", "🏟️ Campos", "🤼‍♂️ Miembros"
+def formatear_precio(is_free, price, dur_num, dur_unit):
+    if is_free == 1 or price == 0:
+        return "Gratis"
+    return f"{price}€ / {dur_num} {dur_unit}"
+
+def get_google_maps_name(url):
+    try:
+        if "maps" not in url: return "Ver Mapa"
+        res = requests.get(url, timeout=5)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        title = soup.find('title').text
+        return title.replace(" - Google Maps", "")
+    except:
+        return "Ver Mapa"
+
+# ================= 5. INTERFAZ DE USUARIO (TABS) =================
+
+tab_votacion, tab_eventos, tab_campos, tab_miembros = st.tabs([
+    "🗳️ Votaciones", "📅 Partidos", "🏟️ Campos", "🤼‍♂️ Miembros"
 ])
 
-# --- TAB: Miembros ---
-with tab_miembros:
-    st.subheader("🤼‍♂️ Gestión de Miembros")
-    # 注意文件名：使用你上传的完整文件名（不带.csv）
-    df_m, _ = load_github_data("eventos - Miembros")
+# --- TAB: 🗳️ Votaciones ---
+with tab_votacion:
+    st.subheader("Votación de horarios")
+    slots, start_week = get_calendar_slots_grouped()
+    df_v, _ = load_github_data("Votaciones")
+    df_m, _ = load_github_data("Miembros")
     
-    with st.form("add_member"):
-        nuevo_nombre = st.text_input("Nombre del nuevo miembro")
-        if st.form_submit_button("Añadir"):
-            if nuevo_nombre:
-                new_row = pd.DataFrame([{"name": nuevo_nombre}])
-                df_m = pd.concat([df_m, new_row], ignore_index=True)
-                if save_github_data("eventos - Miembros", df_m):
-                    st.success(f"{nuevo_nombre} añadido.")
-                    st.rerun()
-
-    if not df_m.empty:
-        for i, row in df_m.iterrows():
-            c1, c2 = st.columns([4, 1])
-            c1.write(row['name'])
-            if c2.button("Eliminar", key=f"del_m_{i}"):
-                df_m = df_m.drop(i)
-                save_github_data("eventos - Miembros", df_m)
+    if not slots:
+        st.info("No hay horarios disponibles en el calendario.")
+    else:
+        # 这里保留你原有的选日期、选人、投票逻辑
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha_voto = st.radio("Selecciona Fecha", list(slots.keys()), horizontal=True)
+        with col2:
+            hora_voto = st.selectbox("Selecciona Hora", slots[fecha_voto])
+            
+        nombre_voto = st.selectbox("¿Quién eres?", df_m['name'].tolist() if not df_m.empty else [])
+        
+        if st.button("Confirmar Votación"):
+            # 简化逻辑：在 Votaciones.csv 中保存记录
+            # 注意：需根据你原本的 CSV 结构调整列名
+            new_vote = pd.DataFrame([{"Fecha": f"{fecha_voto} {hora_voto}", "Jugadores": nombre_voto}])
+            df_v = pd.concat([df_v, new_vote], ignore_index=True)
+            if save_github_data("Votaciones", df_v):
+                st.success("Voto guardado en GitHub")
                 st.rerun()
 
-# --- TAB: Campos ---
+# --- TAB: 📅 Partidos (Eventos) ---
+with tab_eventos:
+    st.subheader("📅 Historial de Partidos")
+    df_e, _ = load_github_data("Eventos")
+    st.dataframe(df_e, use_container_width=True)
+
+# --- TAB: 🏟️ Campos ---
 with tab_campos:
-    st.subheader("🏟️ Campos Registrados")
-    df_c, _ = load_github_data("eventos - Campos")
+    st.subheader("🏟️ Gestión de Campos")
+    df_c, _ = load_github_data("Campos")
     
-    # 简化的添加表单示例
-    with st.expander("➕ Añadir Campo"):
-        with st.form("c_form"):
-            name = st.text_input("Nombre del campo")
-            url = st.text_input("Google Maps URL")
-            if st.form_submit_button("Guardar"):
-                new_c = pd.DataFrame([{"name": name, "map_url": url, "is_free": 0, "price": 0, "duration_num": 1, "duration_unit": "hora"}])
+    with st.expander("➕ Añadir nuevo campo"):
+        with st.form("new_campo"):
+            c_name = st.text_input("Nombre del campo")
+            c_url = st.text_input("URL Google Maps")
+            if st.form_submit_button("Guardar Campo"):
+                new_c = pd.DataFrame([{"name": c_name, "map_url": c_url, "is_free": 0, "price": 0, "duration_num": 1, "duration_unit": "hora"}])
                 df_c = pd.concat([df_c, new_c], ignore_index=True)
-                save_github_data("eventos - Campos", df_c)
+                save_github_data("Campos", df_c)
                 st.rerun()
-
+    
     if not df_c.empty:
         for i, row in df_c.iterrows():
-            st.markdown(f"📍 **{row['name']}** - [Ver en Mapa]({row['map_url']})")
+            st.write(f"📍 {row['name']}")
 
-# --- TAB: Votaciones (核心逻辑) ---
-with tab_votaciones:
-    st.subheader("🗳️ Votaciones Abiertas")
-    df_v, _ = load_github_data("eventos - Votaciones")
-    slots, start_week = get_calendar_slots_grouped()
+# --- TAB: 🤼‍♂️ Miembros ---
+with tab_miembros:
+    st.subheader("🤼‍♂️ Miembros del Club")
+    df_m, _ = load_github_data("Miembros")
     
-    # 这里放置你的投票逻辑，使用 df_v 进行操作
-    # 提交投票时调用 save_github_data("eventos - Votaciones", updated_df)
-
-# --- 首页提示 ---
-with tab_main:
-    st.title("⚽ Football Club Manager")
-    st.info("Datos almacenados en GitHub. Calendario sincronizado con Google.")
+    with st.form("m_form"):
+        new_member = st.text_input("Nombre del nuevo miembro")
+        if st.form_submit_button("Añadir"):
+            if new_member:
+                df_m = pd.concat([df_m, pd.DataFrame([{"name": new_member}])], ignore_index=True)
+                save_github_data("Miembros", df_m)
+                st.rerun()
+    
+    if not df_m.empty:
+        st.table(df_m)
