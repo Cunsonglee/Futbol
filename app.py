@@ -266,19 +266,29 @@ with tab_votar:
 
     # ══════════════════════════════════════════════════════
     # SECCIÓN 1: Calendario
-    # ══════════════════════════════════════════════════════
     st.markdown("**📅 Selecciona fecha y franja horaria:**")
     slots_by_date, start_of_week = get_calendar_slots_grouped()
     selected_slots = []
 
     dias_es = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-    curr = start_of_week
 
+    # CSS compacto: columnas pegadas, sin padding extra de Streamlit
+    st.markdown("""<style>
+    .cal-week { font-size:0.68rem; font-weight:700; color:#888; text-transform:uppercase;
+                letter-spacing:.06em; margin:14px 0 3px 0; }
+    /* Quitar el gap vertical entre filas de columnas */
+    [data-testid="stHorizontalBlock"] { gap: 0.3rem !important; margin-bottom: 0 !important; }
+    [data-testid="stHorizontalBlock"] > div { padding: 0 !important; }
+    /* Checkboxes más pequeños */
+    .stCheckbox label { font-size: 0.78rem !important; }
+    .stCheckbox { margin-bottom: 0 !important; padding: 0 !important; }
+    </style>""", unsafe_allow_html=True)
+
+    curr = start_of_week
     for w in range(6):
         lun = curr.strftime("%d/%m")
         dom = (curr + timedelta(days=6)).strftime("%d/%m")
 
-        # Recopilar días con slots esta semana
         semana_slots = []
         tmp = curr
         for i in range(7):
@@ -288,27 +298,20 @@ with tab_votar:
             tmp += timedelta(days=1)
 
         if semana_slots:
-            st.markdown(
-                f'<div style="font-size:0.7rem;font-weight:600;color:#888;'
-                f'text-transform:uppercase;letter-spacing:0.05em;'
-                f'margin:12px 0 2px 0;">Semana {lun} – {dom}</div>',
-                unsafe_allow_html=True
-            )
+            st.markdown(f'<div class="cal-week">—— Semana {lun}–{dom} ——</div>', unsafe_allow_html=True)
             for nombre, fecha, d_str, franjas in semana_slots:
-                # Columnas fijas: fecha | franja1 | franja2
-                # ratio 1.2:1:1 — funciona bien en móvil y escritorio
-                col_lbl, col_f1, col_f2 = st.columns([1.2, 1, 1])
-                col_lbl.markdown(
-                    f'<div style="padding-top:8px;font-size:0.85rem;'
-                    f'font-weight:700;color:#1a73e8;white-space:nowrap;">⏰ {nombre} {fecha}</div>',
-                    unsafe_allow_html=True
-                )
+                # 4 columnas: fecha(1.8) | franja1(1.5) | franja2(1.5) | relleno(1)
+                c0, c1, c2, c3 = st.columns([1.8, 1.5, 1.5, 1])
+                c0.markdown(
+                    f'<div style="padding:6px 0 0 4px;font-size:0.82rem;font-weight:700;'
+                    f'color:#1a73e8;white-space:nowrap;">{nombre}&nbsp;{fecha}</div>',
+                    unsafe_allow_html=True)
                 for j, franja in enumerate(franjas[:2]):
                     s_val  = f"{d_str} ({franja})"
                     n_vots = len(votos_actuales.get(s_val, []))
                     icon   = "🌅" if franja == "Mañana" else "🌆"
                     label  = f"{icon} {franja} ({n_vots}✓)"
-                    col = col_f1 if j == 0 else col_f2
+                    col = c1 if j == 0 else c2
                     with col:
                         if st.checkbox(label, key=f"chk_{s_val}"):
                             selected_slots.append(s_val)
