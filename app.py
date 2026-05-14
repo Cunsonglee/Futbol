@@ -52,6 +52,10 @@ def load_sheet_data(worksheet_name, ttl=None):
         # Limpiar nombres de columnas (quitar espacios accidentales)
         df.columns = [c.strip() for c in df.columns]
         df = df.dropna(how="all").reset_index(drop=True)
+        # Añadir columnas que falten según los defaults
+        for col in CSV_DEFAULTS.get(worksheet_name, []):
+            if col not in df.columns:
+                df[col] = ""
         return df
     except Exception as e:
         st.error(f"Error al leer {path}: {e}")
@@ -184,7 +188,7 @@ with tab_inicio:
             event   = future_events.iloc[0]
             players = [p.strip() for p in str(event.get('players', "")).split(",")
                        if p.strip() and str(event.get('players', "")) != "nan"]
-            st.info(f"**⏰ Fecha:** {event['datetime']}\n\n**🏟️ Campo:** {event['venue']}")
+            st.info(f"**⏰ Fecha:** {event['datetime']}\n\n**🏟️ Campo:** {event.get('venue','')}")
             st.write(f"🏃‍♂️ **Inscritos ({len(players)}):** {', '.join(players)}")
         else:
             st.info("No hay partidos próximos programados.")
@@ -394,6 +398,8 @@ with tab_historial:
     st.subheader("⏳ Historial de Partidos")
     df_e = load_sheet_data("Eventos")
     if not df_e.empty:
-        st.dataframe(df_e.sort_values("datetime", ascending=False), use_container_width=True)
+        if "datetime" in df_e.columns:
+            df_e = df_e.sort_values("datetime", ascending=False)
+        st.dataframe(df_e, use_container_width=True)
     else:
         st.info("No hay partidos registrados aún.")
